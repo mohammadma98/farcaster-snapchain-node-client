@@ -49,10 +49,12 @@ function printHeader() {
 function printHelp() {
   printHeader();
   console.log('Usage: npx tsx src/cli/index.ts <command> [options]\n');
-  console.log('Available Commands:');
   console.log('  node-info             Check local or remote Snapchain read node status');
   console.log('  create-signer         Create gasless Ed25519 signer authorized by custody key');
   console.log('  post-cast <text>      Publish a cast directly to the node mempool');
+  console.log('  follow <targetFid>    Follow an FID via LinkAdd message');
+  console.log('  unfollow <targetFid>  Unfollow an FID via LinkRemove message');
+  console.log('  react <fid> <hash>    React (like/recast) to a cast');
   console.log('  feed <fid>            View casts for FID with client attribution');
   console.log('  user-profile <fid>    Inspect user metadata (bio, handle, PFP)');
   console.log('  set-node <url>        Configure node endpoint (default: http://127.0.0.1:3381)');
@@ -245,6 +247,64 @@ async function main() {
       console.log(`Display Name: ${user.displayName || 'unknown'}`);
       console.log(`Bio:          ${user.bio || 'none'}`);
       console.log(`PFP:          ${user.pfpUrl || 'none'}`);
+      break;
+    }
+
+    case 'follow':
+    case 'unfollow': {
+      const targetFid = parseInt(args[1], 10);
+      if (!targetFid) {
+        console.error(`Usage: ${command} <targetFid>`);
+        process.exit(1);
+      }
+      if (!config.fid || !config.signerPrivateKey) {
+        console.error('Error: No active signer found. Run `create-signer <fid>` first.');
+        process.exit(1);
+      }
+      const isRemove = command === 'unfollow';
+      console.log(`${isRemove ? 'Unfollowing' : 'Following'} FID ${targetFid} from FID ${config.fid}...`);
+      const result = await client.publishFollow(
+        config.fid,
+        config.signerPrivateKey,
+        targetFid,
+        isRemove,
+        config.nodeUrl
+      );
+      if (result.success) {
+        console.log(`✓ Successfully ${isRemove ? 'unfollowed' : 'followed'} FID ${targetFid}! Hash: ${result.hash || 'gossiped'}`);
+      } else {
+        console.error(`❌ Follow operation failed: ${result.error}`);
+      }
+      break;
+    }
+
+    case 'react': {
+      const targetFid = parseInt(args[1], 10);
+      const targetHash = args[2];
+      const type = (args[3] === 'recast' ? 'recast' : 'like') as 'like' | 'recast';
+      if (!targetFid || !targetHash) {
+        console.error('Usage: react <targetFid> <targetHash> [like|recast]');
+        process.exit(1);
+      }
+      if (!config.fid || !config.signerPrivateKey) {
+        console.error('Error: No active signer found. Run `create-signer <fid>` first.');
+        process.exit(1);
+      }
+      console.log(`Submitting ${type} to cast ${targetHash} from FID ${config.fid}...`);
+      const result = await client.publishReaction(
+        config.fid,
+        config.signerPrivateKey,
+        targetFid,
+        targetHash,
+        type,
+        false,
+        config.nodeUrl
+      );
+      if (result.success) {
+        console.log(`✓ Reaction submitted! Hash: ${result.hash || 'gossiped'}`);
+      } else {
+        console.error(`❌ Reaction failed: ${result.error}`);
+      }
       break;
     }
 

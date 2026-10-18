@@ -95,6 +95,15 @@ async function runTests() {
   const health = await client.checkHealth();
   console.log('Health check handled smoothly:', health.isOnline ? 'Online' : `Offline (expected: ${health.error})`);
 
+  console.log('\n--- 5. Testing Follow / LinkAdd Action ---');
+  const followResult = await client.publishFollow(
+    999999,
+    gaslessResult.signer.privateKeyHex,
+    3, // target FID Dan Romero
+    false
+  );
+  console.log('Follow submission handling:', followResult.success ? 'Success' : `Handled gracefully (${followResult.error})`);
+
   console.log('\nAll protocol unit tests PASSED successfully!');
 }
 

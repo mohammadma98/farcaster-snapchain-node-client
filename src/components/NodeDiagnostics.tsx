@@ -99,14 +99,14 @@ export function NodeDiagnostics({ lang }: NodeDiagnosticsProps) {
             <div className="rounded-xl border border-white/5 bg-white/5 p-3 space-y-1">
               <span className="text-[11px] text-purple-200/60 block">{t.peers}</span>
               <div className="text-base font-bold text-cyan-400">
-                {result.peerCount || result.numPeers || 18}
+                {result.peerCount ?? result.numPeers ?? 0}
               </div>
             </div>
 
             <div className="rounded-xl border border-white/5 bg-white/5 p-3 space-y-1">
               <span className="text-[11px] text-purple-200/60 block">{t.syncStatus}</span>
               <div className="text-base font-bold text-purple-300">
-                {result.isSyncing ? 'Syncing...' : 'Synced (BFT)'}
+                {result.isSyncing ? 'Syncing...' : 'Synchronized (BFT)'}
               </div>
             </div>
           </div>
@@ -117,7 +117,9 @@ export function NodeDiagnostics({ lang }: NodeDiagnosticsProps) {
               <div>
                 <span className="text-xs text-purple-200/60 block">{t.totalMessages}</span>
                 <span className="text-lg font-bold text-white">
-                  {(result.dbStats?.numMessages || 284000000).toLocaleString()}
+                  {typeof result.dbStats?.numMessages === 'number'
+                    ? result.dbStats.numMessages.toLocaleString()
+                    : 'Awaiting sync...'}
                 </span>
               </div>
             </div>
@@ -127,7 +129,9 @@ export function NodeDiagnostics({ lang }: NodeDiagnosticsProps) {
               <div>
                 <span className="text-xs text-purple-200/60 block">{t.totalFids}</span>
                 <span className="text-lg font-bold text-white">
-                  {(result.dbStats?.numFidRegistrations || 1048576).toLocaleString()}
+                  {typeof result.dbStats?.numFidRegistrations === 'number'
+                    ? result.dbStats.numFidRegistrations.toLocaleString()
+                    : 'Awaiting sync...'}
                 </span>
               </div>
             </div>

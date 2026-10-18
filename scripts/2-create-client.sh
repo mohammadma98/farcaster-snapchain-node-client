@@ -40,6 +40,25 @@ fi
 
 echo -e "Using Node.js: ${BOLD}$(node -v)${NC}"
 
+# Ensure git is available
+if ! command -v git &> /dev/null; then
+    echo -e "${YELLOW}Git not detected. Installing git...${NC}"
+    sudo apt-get update -y > /dev/null 2>&1 || true
+    sudo apt-get install -y git
+fi
+
+# Ensure repository exists locally
+REPO_DIR="farcaster-snapchain-node-client"
+if [ ! -f "package.json" ]; then
+    if [ -d "$REPO_DIR" ] && [ -f "$REPO_DIR/package.json" ]; then
+        cd "$REPO_DIR"
+    else
+        echo -e "\n${YELLOW}Cloning repository to local machine...${NC}"
+        git clone https://github.com/mohammadma98/farcaster-snapchain-node-client.git
+        cd "$REPO_DIR"
+    fi
+fi
+
 # Install dependencies if node_modules missing
 if [ ! -d "node_modules" ]; then
     echo -e "\n${YELLOW}Installing client dependencies...${NC}"
@@ -48,6 +67,7 @@ fi
 
 # Set local environment pointing to local node
 export FARCASTER_NODE_URL="${READ_NODE_URL}"
+export PORT="3000"
 
 if [ "$CLIENT_TYPE" == "cli" ]; then
     echo -e "\n${GREEN}${BOLD}Launching Farcaster Interactive CLI Client...${NC}"

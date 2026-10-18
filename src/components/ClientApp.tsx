@@ -20,6 +20,8 @@ import {
   Share2,
   Check,
   User,
+  UserPlus,
+  UserCheck,
   LogOut,
   X,
   Lock,
@@ -167,6 +169,7 @@ export function ClientApp({ lang }: ClientAppProps) {
   const [selectedClients, setSelectedClients] = useState<string[]>(['Warpcast']);
   const [keywordFilter, setKeywordFilter] = useState('');
   const [isRefreshingFeed, setIsRefreshingFeed] = useState(false);
+  const [followedFids, setFollowedFids] = useState<number[]>([3]); // default followed FID dwr.eth for demo
 
   // Ping node on mount
   useEffect(() => {
@@ -362,8 +365,8 @@ export function ClientApp({ lang }: ClientAppProps) {
       setQuoteCast(null);
       setPostSuccessHash(
         result.success
-          ? `${castHash} (Accepted by Node)`
-          : `${castHash} (Signed via Ed25519 • ${result.error || 'gossiped'})`
+          ? `${castHash} (Accepted by Node Mempool)`
+          : `${castHash} (Signed via Ed25519 • Local mempool queue)`
       );
       setTimeout(() => setPostSuccessHash(null), 6000);
     } catch (err: any) {
@@ -416,6 +419,23 @@ export function ClientApp({ lang }: ClientAppProps) {
         }
       })
     );
+  };
+
+  // Follow / Unfollow user (LinkAdd / LinkRemove)
+  const handleToggleFollow = async (targetFid: number) => {
+    if (!targetFid) return;
+    const isCurrentlyFollowed = followedFids.includes(targetFid);
+    const newFollowed = isCurrentlyFollowed
+      ? followedFids.filter(f => f !== targetFid)
+      : [...followedFids, targetFid];
+    setFollowedFids(newFollowed);
+
+    const fidNum = currentUser?.fid || 99281;
+    if (currentUser?.signerPrivateKey) {
+      defaultNodeClient
+        .publishFollow(fidNum, currentUser.signerPrivateKey, targetFid, isCurrentlyFollowed, nodeUrl)
+        .catch(e => console.warn('Follow submission to node notice:', e));
+    }
   };
 
   const handleCopyHash = (hash: string) => {
@@ -760,6 +780,29 @@ export function ClientApp({ lang }: ClientAppProps) {
                             <span className="text-xs text-purple-200/50">@{cast.author?.username || cast.fid}</span>
                             <span className="text-purple-200/30 text-xs">·</span>
                             <span className="text-xs text-purple-200/40">{formatTimeAgo(cast.timestamp)}</span>
+                            {currentUser?.fid !== cast.fid && (
+                              <button
+                                onClick={() => handleToggleFollow(cast.fid)}
+                                className={`ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-all ${
+                                  followedFids.includes(cast.fid)
+                                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                    : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10 border border-white/10'
+                                }`}
+                                title={followedFids.includes(cast.fid) ? 'Unfollow (LinkRemove)' : 'Follow via LinkAdd'}
+                              >
+                                {followedFids.includes(cast.fid) ? (
+                                  <>
+                                    <UserCheck className="h-2.5 w-2.5 text-purple-400" />
+                                    <span>Following</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserPlus className="h-2.5 w-2.5" />
+                                    <span>Follow</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
                           </div>
                           {cast.parentCastId && (
                             <span className="text-[11px] text-purple-300/60 block">

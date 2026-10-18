@@ -51,6 +51,12 @@ echo -e "${YELLOW}[3/4] Pulling docker-compose & validator configs...${NC}"
 curl -sSL -o docker-compose.yml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/docker-compose.mainnet.yml
 curl -sSL -o validators.toml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/validators.toml
 
+# Avoid port conflict: Map Grafana to 3005 so port 3000 remains dedicated to the Farcaster Web Client
+if grep -q "3000:3000" docker-compose.yml; then
+    sed -i.bak 's/3000:3000/3005:3000/g' docker-compose.yml 2>/dev/null || sed -i '' 's/3000:3000/3005:3000/g' docker-compose.yml 2>/dev/null || true
+    rm -f docker-compose.yml.bak 2>/dev/null || true
+fi
+
 mkdir -p grafana
 curl -sSL -o grafana/grafana-dashboard.json https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/grafana/grafana-dashboard.json || true
 curl -sSL -o grafana/grafana.ini https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/grafana/grafana.ini || true
@@ -88,7 +94,7 @@ if [ "$SYNCED" = true ]; then
     echo -e "\n${GREEN}Endpoints available:${NC}"
     echo -e "  - HTTP API: ${BOLD}http://localhost:3381${NC}"
     echo -e "  - gRPC API: ${BOLD}localhost:3383${NC}"
-    echo -e "  - Metrics / Grafana: ${BOLD}http://localhost:3000${NC} (admin/admin)"
+    echo -e "  - Metrics / Grafana: ${BOLD}http://localhost:3005${NC} (admin/admin)"
     echo -e "\nTo inspect live snapshot download and sync logs:"
     echo -e "  ${BOLD}docker logs -f snapchain${NC} or ${BOLD}./snapchain.sh logs${NC}"
 else

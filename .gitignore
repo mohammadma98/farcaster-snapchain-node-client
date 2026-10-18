@@ -13,6 +13,7 @@ node_modules
 # Production build artifacts
 build
 dist
+*.tsbuildinfo
 
 # Temporary CLI sessions & keys
 .farcaster-cli.json

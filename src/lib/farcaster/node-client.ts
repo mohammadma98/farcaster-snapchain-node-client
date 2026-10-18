@@ -298,6 +298,45 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Follow or Unfollow a target FID (LinkAdd / LinkRemove with type 'follow')
+   */
+  async publishFollow(
+    fid: number,
+    signerPrivateKeyHex: string,
+    targetFid: number,
+    isRemove = false,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<{ success: boolean; hash?: string; error?: string }> {
+    try {
+      const privateKeyBytesResult = hexStringToBytes(signerPrivateKeyHex.replace(/^0x/, ''));
+      if (privateKeyBytesResult.isErr()) {
+        return { success: false, error: 'Invalid private key hex' };
+      }
+
+      const signer = new NobleEd25519Signer(privateKeyBytesResult.value);
+      const makeFn = isRemove ? makeLinkRemove : makeLinkAdd;
+
+      const result = await makeFn(
+        {
+          type: 'follow',
+          targetFid,
+        },
+        { fid, network: FarcasterNetwork.MAINNET },
+        signer
+      );
+
+      if (result.isErr()) {
+        return { success: false, error: `Follow operation failed: ${result.error.message}` };
+      }
+
+      const encodedBytes = Message.encode(result.value).finish();
+      return await this.submitMessageProtobuf(encodedBytes, nodeUrl);
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Follow submission failed' };
+    }
+  }
+
+  /**
    * Submit raw protobuf bytes to the node's /v1/submitMessage
    */
   private async submitMessageProtobuf(

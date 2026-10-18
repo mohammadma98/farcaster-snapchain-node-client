@@ -15,7 +15,24 @@ export function identifyCastClient(cast: {
   parentUrl?: string;
   embeds?: Array<{ url?: string; castId?: any }>;
   hash?: string;
+  clientSource?: string;
 }): ClientAttribution {
+  // If already tagged by signer or upstream metadata, return it
+  if (cast.clientSource) {
+    if (cast.clientSource === 'Warpcast') {
+      return { clientName: 'Warpcast', badgeColor: 'bg-purple-500/10 text-purple-400 border-purple-500/20', confidence: 'high', indicator: 'Signer metadata / Channel origin' };
+    }
+    if (cast.clientSource === 'Supercast') {
+      return { clientName: 'Supercast', badgeColor: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20', confidence: 'high', indicator: 'Supercast App Key / embed' };
+    }
+    if (cast.clientSource === 'Phaver') {
+      return { clientName: 'Phaver', badgeColor: 'bg-pink-500/10 text-pink-400 border-pink-500/20', confidence: 'high', indicator: 'Phaver protocol signature' };
+    }
+    if (cast.clientSource === 'Direct Snapchain') {
+      return { clientName: 'Direct Snapchain', badgeColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20', confidence: 'high', indicator: 'Native node submission' };
+    }
+  }
+
   const text = cast.text || '';
   const parentUrl = cast.parentUrl || '';
   const embeds = cast.embeds || [];

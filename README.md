@@ -20,19 +20,19 @@ Run these three commands sequentially on any clean Ubuntu 22.04+ instance or AWS
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash
 ```
-*Configures Docker Engine, sets up UFW firewall (ports 22, 3381 HTTP, 3382 gossip, 3383 gRPC), and tunes Linux kernel network buffers for p2p throughput.*
+*Configures Docker Engine, sets up UFW firewall (ports 22 SSH, 3000 Web, 3381 HTTP, 3382 UDP/TCP gossip, 3383 gRPC), and tunes Linux kernel network buffers for p2p throughput.*
 
 ### 1. Setup & Bootstrap Standalone Read Node
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash
 ```
-*Fetches the official Snapchain `docker-compose.yml` and `validators.toml`, boots the read node container, and continuously polls `http://127.0.0.1:3381/v1/info` until healthy. Requires **zero third-party API keys**.*
+*Fetches the official Snapchain `docker-compose.yml` and `validators.toml`, isolates metrics to port 3005 to keep port 3000 open for the client, boots the read node container, and continuously polls `http://127.0.0.1:3381/v1/info` until healthy. Requires **zero third-party API keys**.*
 
 ### 2. Launch Sovereign Web Client & CLI
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash
 ```
-*Installs dependencies, runs protocol verification tests, and starts the local web interface (`http://localhost:3000`) and terminal CLI.*
+*Auto-clones repository, installs dependencies, verifies protocol cryptography, and launches the web interface (`http://localhost:3000`) and terminal CLI.*
 
 ---
 
@@ -121,13 +121,45 @@ npm run cli create-signer <fid>
 
 # Publish a cast directly to the node mempool
 npm run cli post-cast "Decentralized social via standalone Snapchain read node!"
+
+# Follow a user on-chain via LinkAdd
+npm run cli follow 3
+
+# Unfollow a user via LinkRemove
+npm run cli unfollow 3
+
+# React (like or recast) to a cast
+npm run cli react 2 0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8 like
 ```
+
+---
+
+## 🇨🇳 中文快速入门与架构说明 (Chinese Quickstart & Documentation)
+
+本项目提供完整的端到端独立 Farcaster Snapchain 只读节点与自主 Web/CLI 客户端套件，支持**零第三方 API 密钥**、**无 Gas 签名密钥 (EIP-712)** 与**客户端自由过滤**。
+
+### 极速 3 步启动：
+```bash
+# 0. 服务器与网络配置 (自动安装 Docker，开放 UFW 22, 3000, 3381, 3382 UDP/TCP, 3383 端口)
+curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash
+
+# 1. 启动官方 Snapchain 只读节点 (免第三方 API Key，自动将 Grafana 隔离至 3005 端口)
+curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash
+
+# 2. 自动拉取代码并启动 Web 客户端 (http://localhost:3000) 与 CLI
+curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash
+```
+
+### 核心特性说明：
+- **只读节点直接处理写入**：向本地 `:3381/v1/submitMessage` 发送 Protobuf 二进制消息，只读节点校验后进入本地内存池，并通过 P2P Libp2p (:3382) 广播至验证者出块。
+- **完全免 Gas 密钥 (Engine V16)**：通过以太坊托管地址对 `KeyAddBody` 进行 EIP-712 链下签名，再由 Ed25519 密钥签名证明持有权 (PoP)，无需向 Optimism 发送交易，零 Gas 费。
+- **客户端中立过滤**：支持一键包含或排除来自 Warpcast、Supercast 等特定客户端的内容，构建纯粹去中心化的自主社区。
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the comprehensive protocol test suite verifying binary serialization, client filtering, and cryptographic derivation:
+Run the comprehensive protocol test suite verifying binary serialization, client filtering, follow/link messages, and cryptographic derivation:
 
 ```bash
 npm test

@@ -108,16 +108,19 @@ configure_firewall() {
         
         # Snapchain Ports
         $SUDO ufw allow 3381/tcp comment 'Snapchain HTTP API & submitMessage' > /dev/null 2>&1 || true
-        $SUDO ufw allow 3382/tcp comment 'Snapchain Libp2p Gossip Mesh' > /dev/null 2>&1 || true
+        $SUDO ufw allow 3382/udp comment 'Snapchain Libp2p Gossip Mesh (QUIC)' > /dev/null 2>&1 || true
+        $SUDO ufw allow 3382/tcp comment 'Snapchain Libp2p Gossip Mesh (TCP)' > /dev/null 2>&1 || true
         $SUDO ufw allow 3383/tcp comment 'Snapchain gRPC API' > /dev/null 2>&1 || true
+        $SUDO ufw allow 3000/tcp comment 'Farcaster Web Client' > /dev/null 2>&1 || true
 
         echo -e "  ${GREEN}✓ UFW rules updated:${NC}"
-        echo -e "    - Port 22/tcp   (SSH)"
-        echo -e "    - Port 3381/tcp (HTTP API & Writes)"
-        echo -e "    - Port 3382/tcp (P2P Gossip Mesh)"
-        echo -e "    - Port 3383/tcp (gRPC)"
+        echo -e "    - Port 22/tcp        (SSH)"
+        echo -e "    - Port 3381/tcp      (HTTP API & Writes)"
+        echo -e "    - Port 3382/udp+tcp  (P2P Gossip Mesh - QUIC & TCP)"
+        echo -e "    - Port 3383/tcp      (gRPC)"
+        echo -e "    - Port 3000/tcp      (Web Client)"
     else
-        echo -e "  ${YELLOW}• UFW firewall not active. Ensure cloud security group opens ports 22, 3381, 3382, 3383.${NC}"
+        echo -e "  ${YELLOW}• UFW firewall not active. Ensure cloud security group opens ports 22, 3000, 3381, 3382 (UDP/TCP), 3383.${NC}"
     fi
 }
 
