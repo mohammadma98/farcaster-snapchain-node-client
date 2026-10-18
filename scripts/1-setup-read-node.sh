@@ -24,6 +24,59 @@ echo -e "${BLUE}${BOLD}=========================================================
 echo -e "${BLUE}${BOLD}        (1) Set up a Standalone Snapchain Read Node            ${NC}"
 echo -e "${BLUE}${BOLD}================================================================${NC}"
 
+# Helper function to read user input interactively even when piped via curl | bash
+prompt_user() {
+    local prompt_msg="$1"
+    local default_val="$2"
+    local response=""
+
+    printf "%b" "$prompt_msg" >&2
+
+    if [ -t 0 ]; then
+        read -r response || true
+    elif [ -e /dev/tty ] && [ -r /dev/tty ]; then
+        read -r response < /dev/tty || true
+    else
+        response="$default_val"
+    fi
+
+    if [ -z "$response" ]; then
+        echo "$default_val"
+    else
+        echo "$response"
+    fi
+}
+
+format_bytes() {
+    local b=${1:-0}
+    if ! [[ "$b" =~ ^[0-9]+$ ]]; then
+        b=0
+    fi
+    if [ "$b" -ge 1073741824 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.2f GB", b / 1073741824}'
+    elif [ "$b" -ge 1048576 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.1f MB", b / 1048576}'
+    elif [ "$b" -ge 1024 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.1f KB", b / 1024}'
+    else
+        echo "${b} B"
+    fi
+}
+
+format_speed() {
+    local bps=${1:-0}
+    if ! [[ "$bps" =~ ^[0-9]+$ ]]; then
+        bps=0
+    fi
+    if [ "$bps" -ge 1048576 ]; then
+        awk -v b="$bps" 'BEGIN {printf "%.2f MB/s", b / 1048576}'
+    elif [ "$bps" -ge 1024 ]; then
+        awk -v b="$bps" 'BEGIN {printf "%.1f KB/s", b / 1024}'
+    else
+        echo "${bps} B/s"
+    fi
+}
+
 # ------------------------------------------------------------------------------
 # 1. Verify Step (0) Provisioning State
 # ------------------------------------------------------------------------------
@@ -134,40 +187,147 @@ else
     exit 1
 fi
 
-echo -e "\n${GREEN}${BOLD}Waiting for Snapchain HTTP API to initialize on port 3381...${NC}"
-ATTEMPTS=0
-MAX_ATTEMPTS=30
+# Locate the active Snapchain node container
+CONTAINER_NAME=$(docker ps --filter "name=snapchain" --filter "status=running" --format "{{.Names}}" 2>/dev/null | grep -E "snapchain.*snapchain|snapchain" | head -n 1 || echo "")
+if [ -z "$CONTAINER_NAME" ]; then
+    CONTAINER_NAME=$(docker ps --filter "name=snapchain" --format "{{.Names}}" 2>/dev/null | head -n 1 || echo "snapchain")
+fi
+
+# ------------------------------------------------------------------------------
+# 5. Live Snapshot Download & Sync Monitor
+# ------------------------------------------------------------------------------
+echo -e "\n${CYAN}${BOLD}• Monitoring Snapchain snapshot download & network sync...${NC}"
+echo -e "  ${YELLOW}Notice: Snapshot download and RocksDB extraction will take several minutes.${NC}"
+echo -e "  (Press ${BOLD}Ctrl+C${NC} anytime to detach; the node will continue syncing in Docker in background)\n"
+
+START_TIME=$(date +%s)
+PREV_TIME=$START_TIME
+PREV_BYTES=0
+SPEED=0
 SYNCED=false
 
-while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-    if curl -s http://localhost:3381/v1/info > /dev/null 2>&1; then
+# Clean detach on Ctrl+C without breaking the background Docker containers
+trap 'echo -e "\n\n${YELLOW}[!] Detached from live monitor. Node is actively syncing in Docker.${NC}\nCheck sync logs anytime: ${BOLD}docker logs -f ${CONTAINER_NAME}${NC}\n"; exit 0' INT
+
+while true; do
+    # Check if the HTTP API has initialized and is responding
+    if curl -s -m 2 http://localhost:3381/v1/info > /dev/null 2>&1; then
         SYNCED=true
         break
     fi
-    echo -n "."
-    sleep 2
-    ATTEMPTS=$((ATTEMPTS + 1))
-done
-echo ""
 
-if [ "$SYNCED" = true ]; then
-    echo -e "${GREEN}${BOLD}[✓] Snapchain Read Node is UP and RUNNING!${NC}"
-    echo -e "\n${BLUE}Node Health Summary:${NC}"
-    curl -s http://localhost:3381/v1/info | jq '.' 2>/dev/null || curl -s http://localhost:3381/v1/info
-    echo -e "\n${GREEN}Endpoints available:${NC}"
-    echo -e "  - HTTP API (Reads & submitMessage writes): ${BOLD}http://localhost:3381${NC}"
-    echo -e "  - gRPC API:                               ${BOLD}localhost:3383${NC}"
-    echo -e "  - P2P Gossip Mesh:                        ${BOLD}0.0.0.0:3382 (UDP/QUIC & TCP)${NC}"
-    echo -e "  - Metrics / Grafana Dashboard:            ${BOLD}http://localhost:3005${NC} (admin/admin)"
-    echo -e "\nTo inspect live snapshot download and sync logs:"
-    echo -e "  ${BOLD}docker logs -f snapchain${NC} or ${BOLD}cd ${SNAPCHAIN_DIR} && ./snapchain.sh logs${NC}"
-else
-    echo -e "${YELLOW}[!] The node container started, but HTTP API is still warming up (snapshot download in progress).${NC}"
-    echo -e "Check sync progress anytime with: ${BOLD}docker logs -f snapchain${NC}"
-fi
+    # Ensure container is still running
+    if ! docker ps --filter "name=${CONTAINER_NAME}" --filter "status=running" -q 2>/dev/null | grep -q .; then
+        echo -e "\n${RED}${BOLD}[ERROR] Container ${CONTAINER_NAME} stopped unexpectedly.${NC}"
+        echo -e "${YELLOW}Latest container logs:${NC}"
+        docker logs --tail 25 "${CONTAINER_NAME}" 2>&1 || true
+        exit 1
+    fi
+
+    # Sample Network RX bytes from inside container /proc/net/dev
+    CURRENT_NET=0
+    CURRENT_NET=$(docker exec "${CONTAINER_NAME}" awk '/eth0:/ {print $2}' /proc/net/dev 2>/dev/null || echo 0)
+    if ! [[ "$CURRENT_NET" =~ ^[0-9]+$ ]]; then
+        CURRENT_NET=0
+    fi
+
+    # Sample Host Disk Size inside target Snapchain directory
+    CURRENT_DISK=$(du -sk "${SNAPCHAIN_DIR}/.rocks.snapshot" "${SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk '{sum+=$1} END {print sum*1024}' || echo 0)
+    if ! [[ "$CURRENT_DISK" =~ ^[0-9]+$ ]] || [ "$CURRENT_DISK" -eq 0 ]; then
+        CURRENT_DISK=$(du -sk "${SNAPCHAIN_DIR}" 2>/dev/null | awk '{sum+=$1} END {print sum*1024}' || echo 0)
+    fi
+    if ! [[ "$CURRENT_DISK" =~ ^[0-9]+$ ]]; then
+        CURRENT_DISK=0
+    fi
+
+    # Reference bytes for speed calculation
+    TRACKED_BYTES="$CURRENT_NET"
+    if [ "$TRACKED_BYTES" -eq 0 ]; then
+        TRACKED_BYTES="$CURRENT_DISK"
+    fi
+
+    NOW=$(date +%s)
+    DELTA_TIME=$(( NOW - PREV_TIME ))
+    if [ "$DELTA_TIME" -ge 2 ]; then
+        if [ "$PREV_BYTES" -gt 0 ] && [ "$TRACKED_BYTES" -ge "$PREV_BYTES" ]; then
+            SPEED=$(( (TRACKED_BYTES - PREV_BYTES) / DELTA_TIME ))
+        else
+            SPEED=0
+        fi
+        PREV_BYTES="$TRACKED_BYTES"
+        PREV_TIME="$NOW"
+    fi
+
+    TOTAL_ELAPSED=$(( NOW - START_TIME ))
+    MINS=$(( TOTAL_ELAPSED / 60 ))
+    SECS=$(( TOTAL_ELAPSED % 60 ))
+
+    NET_STR=$(format_bytes "$CURRENT_NET")
+    DISK_STR=$(format_bytes "$CURRENT_DISK")
+    SPEED_STR=$(format_speed "$SPEED")
+
+    # Check if chunk progress is reported in snapshot metadata
+    PROGRESS_DETAIL=""
+    META_FILE="${SNAPCHAIN_DIR}/.rocks.snapshot/metadata.json"
+    if [ -f "$META_FILE" ]; then
+        TOTAL_CHUNKS=$(grep -o '"chunk"' "$META_FILE" 2>/dev/null | wc -l || echo 0)
+        DONE_CHUNKS=$(ls -1 "${SNAPCHAIN_DIR}/.rocks.snapshot" 2>/dev/null | grep -c -E "\.chunk|\.tar|\.zst" || echo 0)
+        if [ "$TOTAL_CHUNKS" -gt 0 ] 2>/dev/null && [ "$DONE_CHUNKS" -gt 0 ] 2>/dev/null; then
+            PCT=$(( DONE_CHUNKS * 100 / TOTAL_CHUNKS ))
+            PROGRESS_DETAIL="[Chunks: ${DONE_CHUNKS}/${TOTAL_CHUNKS} - ${PCT}%]"
+        fi
+    fi
+
+    # Print live progress line with in-place carriage return
+    printf "\r  ${CYAN}➤ Net DL:${NC} %-9s | ${GREEN}Disk:${NC} %-9s | ${YELLOW}Speed:${NC} %-10s | ${BLUE}Time:${NC} %02d:%02d %-24s" \
+        "$NET_STR" "$DISK_STR" "$SPEED_STR" "$MINS" "$SECS" "$PROGRESS_DETAIL"
+
+    sleep 2
+done
+
+# Clear the progress line
+printf "\r%100s\r" " "
+
+TOTAL_TIME=$(( $(date +%s) - START_TIME ))
+TOTAL_MINS=$(( TOTAL_TIME / 60 ))
+TOTAL_SECS=$(( TOTAL_TIME % 60 ))
+
+echo -e "${GREEN}${BOLD}================================================================${NC}"
+echo -e "${GREEN}${BOLD}  ✓ Snapchain Read Node is UP and SYNCHRONIZED! (${TOTAL_MINS}m ${TOTAL_SECS}s)       ${NC}"
+echo -e "${GREEN}${BOLD}================================================================${NC}"
+
+echo -e "\n${BLUE}Node Health Summary (http://localhost:3381/v1/info):${NC}"
+curl -s http://localhost:3381/v1/info | jq '.' 2>/dev/null || curl -s http://localhost:3381/v1/info
+echo -e "\n${GREEN}Endpoints available:${NC}"
+echo -e "  - HTTP API (Reads & submitMessage writes): ${BOLD}http://localhost:3381${NC}"
+echo -e "  - gRPC API:                               ${BOLD}localhost:3383${NC}"
+echo -e "  - P2P Gossip Mesh:                        ${BOLD}0.0.0.0:3382 (UDP/QUIC & TCP)${NC}"
+echo -e "  - Metrics / Grafana Dashboard:            ${BOLD}http://localhost:3005${NC} (admin/admin)"
+echo -e "\nTo inspect live peer connections and logs:"
+echo -e "  ${BOLD}docker logs -f ${CONTAINER_NAME}${NC} or ${BOLD}cd ${SNAPCHAIN_DIR} && ./snapchain.sh logs${NC}"
 
 echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-echo -e "${GREEN}${BOLD}  ✓ Step (1) Complete: Snapchain Read Node is operational!      ${NC}"
-echo -e "${GREEN}${BOLD}================================================================${NC}"
-echo -e "Next step: Run Command (2) to launch your Sovereign Client & Web UI:"
-echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash${NC}\n"
+echo -e "${GREEN}${BOLD}  ✓ Step (1) Complete: Standalone Read Node is fully operational!${NC}"
+echo -e "${GREEN}${BOLD}================================================================${NC}\n"
+
+# ------------------------------------------------------------------------------
+# 6. Interactive Prompt to Execute Step (2) Automatically
+# ------------------------------------------------------------------------------
+AUTO_STEP2=$(prompt_user "Would you like to automatically launch Step (2) [Sovereign Client & Web UI] now? [Y/n]: " "y")
+
+case "$AUTO_STEP2" in
+    [yY]|[yY][eE][sS])
+        echo -e "\n${CYAN}${BOLD}Launching Step (2): Setting up Sovereign Web Client & CLI...${NC}\n"
+        if [ -f "./scripts/2-create-client.sh" ]; then
+            exec bash "./scripts/2-create-client.sh"
+        elif [ -f "./2-create-client.sh" ]; then
+            exec bash "./2-create-client.sh"
+        else
+            exec bash -c "$(curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh)"
+        fi
+        ;;
+    *)
+        echo -e "\nNext step: Run Command (2) whenever you are ready to launch your Client & Web UI:"
+        echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash${NC}\n"
+        ;;
+esac

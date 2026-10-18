@@ -299,8 +299,7 @@ else
         if [ "$IDX" -eq 1 ]; then
             TAG="${GREEN}${BOLD}[RECOMMENDED - Largest Free Space]${NC}"
         fi
-        printf "  [%d] Mount: %-12s | Free: %-7s GB | Total: %-6s | Device: %-30s %b\n" \
-            "$IDX" "${BOLD}${em_mount}${NC}" "${BOLD}${em_avail}${NC}" "$em_total" "$em_device" "$TAG"
+        echo -e "  [${BOLD}${IDX}${NC}] Mount: ${BOLD}${em_mount}${NC} | Free: ${BOLD}${em_avail} GB${NC} | Total: ${em_total} | Device: ${em_device} ${TAG}"
         IDX=$((IDX + 1))
     done
 
@@ -477,9 +476,10 @@ case "$AUTO_STEP1" in
         echo -e "\n${CYAN}${BOLD}Launching Step (1): Setting up Standalone Snapchain Read Node...${NC}\n"
         
         # Check if local script exists
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
-        if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/1-setup-read-node.sh" ]; then
-            exec bash "$SCRIPT_DIR/1-setup-read-node.sh"
+        if [ -f "./scripts/1-setup-read-node.sh" ]; then
+            exec bash "./scripts/1-setup-read-node.sh"
+        elif [ -f "./1-setup-read-node.sh" ]; then
+            exec bash "./1-setup-read-node.sh"
         else
             exec bash -c "$(curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh)"
         fi
