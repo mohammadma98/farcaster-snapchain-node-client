@@ -29,6 +29,7 @@ export class GaslessSignerManager {
       const cleanUrl = nodeUrl.replace(/\/$/, '');
       const response = await fetch(`${cleanUrl}/v1/signersByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(3000),
       });
 
       if (!response.ok) {
@@ -131,6 +132,7 @@ export class GaslessSignerManager {
           'Content-Type': 'application/octet-stream',
         },
         body: encodedBytes as any,
+        signal: AbortSignal.timeout(4000),
       });
 
       if (!response.ok) {

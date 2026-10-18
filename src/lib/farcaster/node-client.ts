@@ -181,12 +181,17 @@ export class SnapchainNodeClient {
 
   /**
    * Publish a cast directly to the local node's mempool via protobuf
+   * Supports normal casts, replies (parentCastId), and quote casts (embeds with castId)
    */
   async publishCast(
     fid: number,
     signerPrivateKeyHex: string,
     text: string,
-    options?: { parentUrl?: string; embeds?: string[] },
+    options?: {
+      parentUrl?: string;
+      parentCastId?: { fid: number; hash: string };
+      embeds?: Array<string | { url?: string; castId?: { fid: number; hash: string } }>;
+    },
     nodeUrl = this.defaultNodeUrl
   ): Promise<{ success: boolean; hash?: string; error?: string }> {
     try {
@@ -196,7 +201,30 @@ export class SnapchainNodeClient {
       }
 
       const signer = new NobleEd25519Signer(privateKeyBytesResult.value);
-      const embeds = (options?.embeds || []).map(url => ({ url }));
+
+      // Parse embeds (URLs or Quote Casts)
+      const embeds: Array<{ url?: string; castId?: { fid: number; hash: Uint8Array } }> = [];
+      for (const item of options?.embeds || []) {
+        if (typeof item === 'string') {
+          embeds.push({ url: item });
+        } else if (item.url) {
+          embeds.push({ url: item.url });
+        } else if (item.castId) {
+          const hashBytesRes = hexStringToBytes(item.castId.hash.replace(/^0x/, ''));
+          if (hashBytesRes.isOk()) {
+            embeds.push({ castId: { fid: item.castId.fid, hash: hashBytesRes.value } });
+          }
+        }
+      }
+
+      // Parse parentCastId (for replies)
+      let parentCastId: { fid: number; hash: Uint8Array } | undefined;
+      if (options?.parentCastId) {
+        const parentHashRes = hexStringToBytes(options.parentCastId.hash.replace(/^0x/, ''));
+        if (parentHashRes.isOk()) {
+          parentCastId = { fid: options.parentCastId.fid, hash: parentHashRes.value };
+        }
+      }
 
       const castResult = await makeCastAdd(
         {
@@ -206,6 +234,7 @@ export class SnapchainNodeClient {
           mentions: [],
           mentionsPositions: [],
           parentUrl: options?.parentUrl,
+          parentCastId,
           type: CastType.CAST,
         },
         { fid, network: FarcasterNetwork.MAINNET },

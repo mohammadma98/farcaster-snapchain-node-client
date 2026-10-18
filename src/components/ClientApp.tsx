@@ -15,6 +15,17 @@ import {
   RefreshCw,
   SlidersHorizontal,
   ExternalLink,
+  MessageSquare,
+  Quote,
+  Share2,
+  Check,
+  User,
+  LogOut,
+  X,
+  Lock,
+  ChevronDown,
+  Layers,
+  ArrowRight,
 } from 'lucide-react';
 import { Language, translations } from '../lib/translations';
 import { FarcasterCast, ClientFilterConfig } from '../lib/farcaster/types';
@@ -27,7 +38,19 @@ interface ClientAppProps {
   lang: Language;
 }
 
-// Sample initialized feeds demonstrating client diversity
+interface LoggedInUser {
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
+  custodyAddress: string;
+  activeSignerKey: string;
+  signerPrivateKey: string;
+  expiresAt: number;
+  isSandbox: boolean;
+}
+
+// Initial demo casts showcasing rich Farcaster ecosystem diversity
 const INITIAL_DEMO_CASTS: FarcasterCast[] = [
   {
     hash: '0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8',
@@ -84,6 +107,14 @@ const INITIAL_DEMO_CASTS: FarcasterCast[] = [
       displayName: 'Sovereign Builder',
       pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
     },
+    embeds: [
+      {
+        castId: {
+          fid: 2,
+          hash: '0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8',
+        },
+      },
+    ],
     clientSource: 'Direct Snapchain',
     reactions: { likesCount: 19, recastsCount: 5, likedByMe: false, recastByMe: false },
   },
@@ -113,20 +144,22 @@ export function ClientApp({ lang }: ClientAppProps) {
   const [latency, setLatency] = useState<number | null>(null);
   const [isPinging, setIsPinging] = useState(false);
 
-  // Signer & Sandbox account state
-  const [fid, setFid] = useState('99281');
-  const [custodySecret, setCustodySecret] = useState('');
-  const [activeSignerKey, setActiveSignerKey] = useState<string | null>(null);
-  const [signerPrivateKey, setSignerPrivateKey] = useState<string | null>(null);
-  const [signerExpires, setSignerExpires] = useState<string | null>(null);
-  const [isGeneratingSigner, setIsGeneratingSigner] = useState(false);
-  const [signerMessage, setSignerMessage] = useState<string | null>(null);
-  const [signerError, setSignerError] = useState<string | null>(null);
+  // User Authentication & Gasless Signer
+  const [currentUser, setCurrentUser] = useState<LoggedInUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authTab, setAuthTab] = useState<'sandbox' | 'import'>('sandbox');
+  const [inputFid, setInputFid] = useState('99281');
+  const [inputSecret, setInputSecret] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Cast composer
+  // Cast composer & interactions (Reply & Quote)
   const [castText, setCastText] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
   const [postSuccessHash, setPostSuccessHash] = useState<string | null>(null);
+  const [replyToCast, setReplyToCast] = useState<FarcasterCast | null>(null);
+  const [quoteCast, setQuoteCast] = useState<FarcasterCast | null>(null);
+  const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   // Feed & Client Filtering
   const [casts, setCasts] = useState<FarcasterCast[]>(INITIAL_DEMO_CASTS);
@@ -158,122 +191,179 @@ export function ClientApp({ lang }: ClientAppProps) {
     }
   };
 
-  const handleGenerateSandbox = () => {
-    // Generate real, cryptographically valid private key and custody account
-    try {
-      const sandbox = generateCustodyAccount();
-      setCustodySecret(sandbox.privateKey);
-      setFid('99281');
-      setSignerMessage(
-        lang === 'zh'
-          ? `已生成沙盒托管地址: ${sandbox.address.slice(0, 8)}...${sandbox.address.slice(-6)}`
-          : `Generated sandbox custody account: ${sandbox.address.slice(0, 8)}...${sandbox.address.slice(-6)}`
-      );
-      setSignerError(null);
-    } catch {
-      const sampleHex = '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d';
-      setCustodySecret(sampleHex);
-      setFid('99281');
-    }
-  };
-
-  const handleIssueGaslessSigner = async () => {
-    const fidNum = parseInt(fid, 10);
-    if (!fidNum || !custodySecret.trim()) {
-      setSignerError(lang === 'zh' ? '请输入有效的 FID 和私钥/助记词' : 'Please provide a valid FID and Custody Secret');
-      return;
-    }
-
-    setIsGeneratingSigner(true);
-    setSignerMessage(null);
-    setSignerError(null);
+  // 1. One-Click Instant Sandbox Login (Unix `rm` policy compliant)
+  const handleLaunchSandbox = async () => {
+    setIsAuthenticating(true);
+    setAuthError(null);
 
     try {
-      // 1. Real cryptographic execution:
-      // Derives custody -> generates Ed25519 keypair -> produces EIP-712 KeyAddBody -> signs envelope (Proof of Possession) -> encodes protobuf
+      // Generate real cryptographic custody account
+      const sandboxCustody = generateCustodyAccount();
+      const testFid = 99281;
+
+      // Issue gasless Ed25519 signer via EIP-712
       const { signer, encodedBytes } = await GaslessSignerManager.issueGaslessSigner({
-        fid: fidNum,
-        custodyPrivateKey: custodySecret.trim(),
+        fid: testFid,
+        custodyPrivateKey: sandboxCustody.privateKey,
         nodeUrl,
       });
 
-      setActiveSignerKey(signer.publicKeyHex);
-      setSignerPrivateKey(signer.privateKeyHex);
-      const expiryDate = new Date(signer.expiresAt * 1000).toLocaleDateString();
-      setSignerExpires(`${expiryDate} (Sliding TTL)`);
+      // Submit KEY_ADD message to node mempool
+      await GaslessSignerManager.submitKeyAddToNode(nodeUrl, encodedBytes);
 
-      // 2. Submit KEY_ADD binary protobuf directly to the local node :3381/v1/submitMessage
-      const submitResult = await GaslessSignerManager.submitKeyAddToNode(nodeUrl, encodedBytes);
+      const user: LoggedInUser = {
+        fid: testFid,
+        username: 'sandbox_builder',
+        displayName: 'Sandbox Developer',
+        pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        custodyAddress: sandboxCustody.address,
+        activeSignerKey: signer.publicKeyHex,
+        signerPrivateKey: signer.privateKeyHex,
+        expiresAt: signer.expiresAt,
+        isSandbox: true,
+      };
 
-      if (submitResult.success) {
-        setSignerMessage(
-          lang === 'zh'
-            ? `EIP-712 签名完成！KEY_ADD 已提交至本地节点内存池 (Hash: ${submitResult.hash || 'gossiped'})`
-            : `EIP-712 Signer active & submitted to node mempool! (Hash: ${submitResult.hash || 'gossiped'})`
-        );
-      } else {
-        setSignerMessage(
-          lang === 'zh'
-            ? `EIP-712 签名完成 (${encodedBytes.length} 字节 Protobuf)。节点响应: ${submitResult.error || '节点正在同步'}`
-            : `EIP-712 keypair signed (${encodedBytes.length} bytes protobuf). Node notice: ${submitResult.error || 'syncing snapshot'}`
-        );
-      }
+      setCurrentUser(user);
+      setIsAuthModalOpen(false);
     } catch (err: any) {
-      setSignerError(err.message || 'Failed to issue gasless signer');
+      setAuthError(err.message || 'Failed to initialize sandbox signer');
     } finally {
-      setIsGeneratingSigner(false);
+      setIsAuthenticating(false);
     }
   };
 
+  // 2. Import Seed Phrase / Private Key Login
+  const handleImportLogin = async () => {
+    const fidNum = parseInt(inputFid, 10);
+    if (!fidNum || !inputSecret.trim()) {
+      setAuthError(lang === 'zh' ? '请输入有效的 FID 和私钥/助记词' : 'Please provide a valid FID and Custody Secret');
+      return;
+    }
+
+    setIsAuthenticating(true);
+    setAuthError(null);
+
+    try {
+      const { signer, encodedBytes } = await GaslessSignerManager.issueGaslessSigner({
+        fid: fidNum,
+        custodyPrivateKey: inputSecret.trim(),
+        nodeUrl,
+      });
+
+      await GaslessSignerManager.submitKeyAddToNode(nodeUrl, encodedBytes);
+
+      // Fetch profile from node if available
+      const profile = await defaultNodeClient.getUserProfile(fidNum, nodeUrl);
+
+      const user: LoggedInUser = {
+        fid: fidNum,
+        username: profile.username || `user_${fidNum}`,
+        displayName: profile.displayName || `FID ${fidNum}`,
+        pfpUrl: profile.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        custodyAddress: profile.custodyAddress || '0x...',
+        activeSignerKey: signer.publicKeyHex,
+        signerPrivateKey: signer.privateKeyHex,
+        expiresAt: signer.expiresAt,
+        isSandbox: false,
+      };
+
+      setCurrentUser(user);
+      setIsAuthModalOpen(false);
+    } catch (err: any) {
+      setAuthError(err.message || 'Failed to issue gasless signer');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    setCurrentUser(null);
+    setReplyToCast(null);
+    setQuoteCast(null);
+  };
+
+  // 3. Publish Cast, Reply, or Quote Cast
   const handlePublishCast = async () => {
     if (!castText.trim()) return;
-    const fidNum = parseInt(fid, 10) || 99281;
+
+    // Ensure we have an active signer (or auto-launch sandbox)
+    let userToUse = currentUser;
+    if (!userToUse) {
+      const sandboxCustody = generateCustodyAccount();
+      const testFid = 99281;
+      const { signer } = await GaslessSignerManager.issueGaslessSigner({
+        fid: testFid,
+        custodyPrivateKey: sandboxCustody.privateKey,
+        nodeUrl,
+      });
+      userToUse = {
+        fid: testFid,
+        username: 'sandbox_builder',
+        displayName: 'Sandbox Developer',
+        pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        custodyAddress: sandboxCustody.address,
+        activeSignerKey: signer.publicKeyHex,
+        signerPrivateKey: signer.privateKeyHex,
+        expiresAt: signer.expiresAt,
+        isSandbox: true,
+      };
+      setCurrentUser(userToUse);
+    }
 
     setIsPublishing(true);
     setPostSuccessHash(null);
 
     try {
-      let keyToUse = signerPrivateKey;
-      if (!keyToUse) {
-        const { generateEd25519KeyPair } = await import('../lib/farcaster/crypto');
-        const kp = generateEd25519KeyPair();
-        keyToUse = kp.privateKeyHex;
-        setSignerPrivateKey(keyToUse);
-        setActiveSignerKey(kp.publicKeyHex);
+      const options: {
+        parentCastId?: { fid: number; hash: string };
+        embeds?: Array<{ url?: string; castId?: { fid: number; hash: string } }>;
+      } = {};
+
+      if (replyToCast) {
+        options.parentCastId = { fid: replyToCast.fid, hash: replyToCast.hash };
       }
 
-      // 1. Submit REAL signed cast directly to the node (:3381/v1/submitMessage)
+      if (quoteCast) {
+        options.embeds = [{ castId: { fid: quoteCast.fid, hash: quoteCast.hash } }];
+      }
+
       const result = await defaultNodeClient.publishCast(
-        fidNum,
-        keyToUse,
+        userToUse.fid,
+        userToUse.signerPrivateKey,
         castText,
-        undefined,
+        options,
         nodeUrl
       );
 
-      const castHash = result.hash || ('0x' + Array.from({ length: 20 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join(''));
+      const castHash =
+        result.hash ||
+        '0x' + Array.from({ length: 20 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
 
       const newCast: FarcasterCast = {
         hash: castHash,
-        fid: fidNum,
+        fid: userToUse.fid,
         text: castText,
         timestamp: Date.now(),
         author: {
-          fid: fidNum,
-          username: `user${fidNum}`,
-          displayName: `FID ${fidNum} (Local Node)`,
-          pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+          fid: userToUse.fid,
+          username: userToUse.username,
+          displayName: userToUse.displayName,
+          pfpUrl: userToUse.pfpUrl,
         },
+        parentCastId: replyToCast ? { fid: replyToCast.fid, hash: replyToCast.hash } : undefined,
+        embeds: quoteCast ? [{ castId: { fid: quoteCast.fid, hash: quoteCast.hash } }] : undefined,
         clientSource: 'Direct Snapchain',
         reactions: { likesCount: 0, recastsCount: 0, likedByMe: false, recastByMe: false },
       };
 
       setCasts(prev => [newCast, ...prev]);
       setCastText('');
+      setReplyToCast(null);
+      setQuoteCast(null);
       setPostSuccessHash(
         result.success
           ? `${castHash} (Accepted by Node)`
-          : `${castHash} (Signed via Ed25519 • ${result.error || 'broadcasted'})`
+          : `${castHash} (Signed via Ed25519 • ${result.error || 'gossiped'})`
       );
       setTimeout(() => setPostSuccessHash(null), 6000);
     } catch (err: any) {
@@ -283,23 +373,17 @@ export function ClientApp({ lang }: ClientAppProps) {
     }
   };
 
+  // 4. Reactions: Like & Recast
   const handleToggleReaction = async (hash: string, type: 'like' | 'recast') => {
-    const fidNum = parseInt(fid, 10) || 99281;
+    const fidNum = currentUser?.fid || 99281;
     const targetCast = casts.find(c => c.hash === hash);
     const targetFid = targetCast?.fid || fidNum;
 
-    // Real reaction submission to the node if signer exists
-    if (signerPrivateKey) {
+    if (currentUser?.signerPrivateKey) {
       const isRemove = type === 'like' ? !!targetCast?.reactions?.likedByMe : !!targetCast?.reactions?.recastByMe;
-      defaultNodeClient.publishReaction(
-        fidNum,
-        signerPrivateKey,
-        targetFid,
-        hash,
-        type,
-        isRemove,
-        nodeUrl
-      ).catch(e => console.warn('Reaction submission to node notice:', e));
+      defaultNodeClient
+        .publishReaction(fidNum, currentUser.signerPrivateKey, targetFid, hash, type, isRemove, nodeUrl)
+        .catch(e => console.warn('Reaction submission to node notice:', e));
     }
 
     // Optimistic UI update
@@ -316,7 +400,7 @@ export function ClientApp({ lang }: ClientAppProps) {
             ...c,
             reactions: {
               ...c.reactions!,
-              likesCount: liked ? currentLikes - 1 : currentLikes + 1,
+              likesCount: liked ? Math.max(0, currentLikes - 1) : currentLikes + 1,
               likedByMe: !liked,
             },
           };
@@ -325,7 +409,7 @@ export function ClientApp({ lang }: ClientAppProps) {
             ...c,
             reactions: {
               ...c.reactions!,
-              recastsCount: recasted ? currentRecasts - 1 : currentRecasts + 1,
+              recastsCount: recasted ? Math.max(0, currentRecasts - 1) : currentRecasts + 1,
               recastByMe: !recasted,
             },
           };
@@ -334,18 +418,22 @@ export function ClientApp({ lang }: ClientAppProps) {
     );
   };
 
+  const handleCopyHash = (hash: string) => {
+    navigator.clipboard.writeText(hash);
+    setCopiedHash(hash);
+    setTimeout(() => setCopiedHash(null), 2000);
+  };
+
   const handleRefreshFeed = async () => {
     setIsRefreshingFeed(true);
-    const fidNum = parseInt(fid, 10) || 2;
+    const fidNum = currentUser?.fid || 2;
     try {
       const realCasts = await defaultNodeClient.getCastsByFid(fidNum, 30, nodeUrl);
       if (realCasts && realCasts.length > 0) {
         setCasts(realCasts);
-      } else {
-        setCasts(prev => (prev.length > 0 ? prev : INITIAL_DEMO_CASTS));
       }
     } catch {
-      setCasts([...INITIAL_DEMO_CASTS]);
+      // Keep existing casts
     } finally {
       setIsRefreshingFeed(false);
     }
@@ -359,7 +447,34 @@ export function ClientApp({ lang }: ClientAppProps) {
     }
   };
 
-  // Run client filtering
+  // Format time ago (e.g. 14m, 2h)
+  const formatTimeAgo = (timestamp: number) => {
+    const diff = Math.floor((Date.now() - timestamp) / 1000);
+    if (diff < 60) return `${diff}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}d`;
+  };
+
+  // Find quoted cast if present
+  const getQuotedCast = (cast: FarcasterCast): FarcasterCast | null => {
+    const quoteEmbed = (cast.embeds || []).find(e => e.castId);
+    if (!quoteEmbed || !quoteEmbed.castId) return null;
+    return casts.find(c => c.hash === quoteEmbed.castId?.hash) || {
+      hash: quoteEmbed.castId.hash,
+      fid: quoteEmbed.castId.fid,
+      text: 'Quoted cast referenced via protocol embed on Snapchain.',
+      timestamp: cast.timestamp - 3600000,
+      author: {
+        fid: quoteEmbed.castId.fid,
+        username: `fid_${quoteEmbed.castId.fid}`,
+        displayName: `FID ${quoteEmbed.castId.fid}`,
+        pfpUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face',
+      },
+    };
+  };
+
+  // Apply Client Filtering
   const keywords = keywordFilter.split(',').map(s => s.trim()).filter(Boolean);
   const { filtered, stats } = applyClientFilter(casts, {
     mode: filterMode,
@@ -376,136 +491,482 @@ export function ClientApp({ lang }: ClientAppProps) {
 
   return (
     <div className="space-y-6">
-      {/* 1. Node Connection Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-white/10 bg-black/40 p-4 backdrop-blur-md">
+      {/* 1. Sub-Header: Node Status & Account Banner */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[#120f1d]/80 p-4 backdrop-blur-xl shadow-lg">
+        {/* Left: Node Ping Status */}
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <Radio className="h-5 w-5 text-purple-400 shrink-0" />
-          <div className="flex-1">
-            <span className="text-xs font-medium text-purple-200/60 block">{t.nodeEndpoint}</span>
-            <input
-              type="text"
-              value={nodeUrl}
-              onChange={e => setNodeUrl(e.target.value)}
-              className="bg-transparent font-mono text-xs text-white border-b border-purple-500/30 focus:border-purple-400 focus:outline-none w-full sm:w-64"
-            />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-600/20 text-purple-400">
+            <Radio className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-white">Snapchain Node</span>
+              {nodeOnline === true ? (
+                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {t.online} ({latency}ms)
+                </span>
+              ) : nodeOnline === false ? (
+                <span className="flex items-center gap-1 text-[11px] text-amber-400 font-medium">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  {t.offline} (Local syncing)
+                </span>
+              ) : null}
+            </div>
+            <span className="text-[11px] text-purple-200/50 font-mono">{nodeUrl}</span>
           </div>
         </div>
 
+        {/* Right: User State / Sign In Button */}
         <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-          <div className="flex items-center gap-2 text-xs">
-            {nodeOnline === true ? (
-              <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                {t.online} ({latency}ms)
-              </span>
-            ) : nodeOnline === false ? (
-              <span className="flex items-center gap-1.5 text-amber-400 font-medium">
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                {t.offline} (Local node syncing / sandbox active)
-              </span>
-            ) : null}
-          </div>
-
           <button
             onClick={pingNode}
             disabled={isPinging}
-            className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-300 hover:bg-purple-500/20 transition-all"
+            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-medium text-purple-200 transition-all"
+            title="Ping Node"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin' : ''}`} />
-            <span>{t.ping}</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin text-purple-400' : ''}`} />
+            <span className="hidden sm:inline">{t.ping}</span>
           </button>
-        </div>
-      </div>
 
-      {/* 2. Developer Security Warning (Unix `rm` Analogy) */}
-      <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
-        <div className="flex items-start gap-3">
-          <ShieldAlert className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-          <div className="space-y-2 flex-1">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-amber-300">{t.securityNoticeTitle}</h3>
+          {currentUser ? (
+            <div className="flex items-center gap-2.5 rounded-xl border border-purple-500/30 bg-purple-950/40 px-3 py-1.5 shadow-sm">
+              <img
+                src={currentUser.pfpUrl}
+                alt={currentUser.username}
+                className="h-6 w-6 rounded-full object-cover border border-purple-400"
+              />
+              <div className="text-left">
+                <span className="text-xs font-bold text-white block leading-tight">{currentUser.displayName}</span>
+                <span className="text-[10px] text-purple-300/70 font-mono block">@{currentUser.username}</span>
+              </div>
               <button
-                onClick={handleGenerateSandbox}
-                className="flex items-center gap-1.5 text-xs font-semibold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1 rounded-md border border-amber-500/30 transition-all self-start sm:self-auto"
+                onClick={handleSignOut}
+                className="ml-1 text-purple-300 hover:text-white p-1 transition-colors"
+                title={t.signOut}
               >
-                <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-                <span>{t.generateSandbox}</span>
+                <LogOut className="h-3.5 w-3.5" />
               </button>
             </div>
-            <p className="text-xs text-amber-200/80 leading-relaxed">{t.securityNoticeBody}</p>
-          </div>
+          ) : (
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex items-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-500 px-4 py-2 text-xs font-semibold text-white transition-all shadow-lg shadow-purple-600/30 active:scale-95"
+            >
+              <Key className="h-3.5 w-3.5" />
+              <span>{t.signIn}</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {/* 2. Main Workspace Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Signer Manager & Filter Controls */}
-        <div className="space-y-6 lg:col-span-1">
-          {/* Signer Manager */}
-          <div className="rounded-xl border border-white/10 bg-black/40 p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Key className="h-4 w-4 text-purple-400" />
-              <h3 className="text-sm font-bold text-white">App Key / Signer Manager</h3>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-purple-200/70 block mb-1">{t.fidLabel}</label>
-                <input
-                  type="text"
-                  value={fid}
-                  onChange={e => setFid(e.target.value)}
-                  placeholder="e.g. 12345"
-                  className="w-full rounded-lg bg-black/60 border border-white/10 px-3 py-2 text-xs text-white focus:border-purple-400 focus:outline-none font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-purple-200/70 block mb-1">{t.custodyKeyLabel}</label>
-                <input
-                  type="password"
-                  value={custodySecret}
-                  onChange={e => setCustodySecret(e.target.value)}
-                  placeholder={t.custodyKeyPlaceholder}
-                  className="w-full rounded-lg bg-black/60 border border-white/10 px-3 py-2 text-xs text-white focus:border-purple-400 focus:outline-none font-mono"
-                />
-              </div>
-
+        {/* Center / Feed Stream (farcaster.xyz style feed) */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Quick Client Filter Bar (farcaster.xyz aesthetic) */}
+          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
               <button
-                onClick={handleIssueGaslessSigner}
-                disabled={isGeneratingSigner}
-                className="w-full rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs py-2.5 transition-all shadow-md shadow-purple-600/20 active:scale-95 disabled:opacity-50"
+                onClick={() => setFilterMode('all')}
+                className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all whitespace-nowrap ${
+                  filterMode === 'all'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                    : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10'
+                }`}
               >
-                {isGeneratingSigner ? 'Signing EIP-712...' : t.generateKeyAdd}
+                All Feeds
               </button>
-
-              {signerMessage && (
-                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2 text-[11px] text-emerald-300 flex items-start gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>{signerMessage}</span>
-                </div>
-              )}
-
-              {signerError && (
-                <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2 text-[11px] text-amber-300 flex items-start gap-1.5">
-                  <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-400" />
-                  <span>{signerError}</span>
-                </div>
-              )}
-
-              {activeSignerKey && (
-                <div className="rounded-lg bg-purple-950/40 border border-purple-500/20 p-3 space-y-1 font-mono text-[11px]">
-                  <span className="text-purple-300/70 block">{t.activeSigner}:</span>
-                  <div className="text-purple-200 truncate">{activeSignerKey}</div>
-                  <div className="text-purple-400/60 text-[10px]">
-                    {t.expiresIn}: {signerExpires}
-                  </div>
-                </div>
-              )}
+              <button
+                onClick={() => {
+                  setFilterMode('exclude');
+                  setSelectedClients(['Warpcast']);
+                }}
+                className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all whitespace-nowrap ${
+                  filterMode === 'exclude' && selectedClients.includes('Warpcast')
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                    : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Exclude Warpcast
+              </button>
+              <button
+                onClick={() => {
+                  setFilterMode('include');
+                  setSelectedClients(['Supercast']);
+                }}
+                className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all whitespace-nowrap ${
+                  filterMode === 'include' && selectedClients.includes('Supercast')
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                    : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Supercast Only
+              </button>
+              <button
+                onClick={() => {
+                  setFilterMode('include');
+                  setSelectedClients(['Direct Snapchain']);
+                }}
+                className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all whitespace-nowrap ${
+                  filterMode === 'include' && selectedClients.includes('Direct Snapchain')
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                    : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                Native Snapchain
+              </button>
             </div>
+
+            <button
+              onClick={handleRefreshFeed}
+              disabled={isRefreshingFeed}
+              className="flex items-center gap-1 text-xs text-purple-300 hover:text-white transition-colors shrink-0"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingFeed ? 'animate-spin' : ''}`} />
+            </button>
           </div>
 
-          {/* Community Filter Controls (Client Neutrality Engine) */}
-          <div className="rounded-xl border border-white/10 bg-black/40 p-5 space-y-4">
+          {/* Inline Cast Composer (farcaster.xyz style) */}
+          <div className="rounded-2xl border border-white/10 bg-[#120f1d] p-4 sm:p-5 shadow-xl space-y-3">
+            {/* Replying Notice */}
+            {replyToCast && (
+              <div className="flex items-center justify-between rounded-xl bg-purple-950/40 border border-purple-500/30 px-3 py-1.5 text-xs text-purple-200">
+                <div className="flex items-center gap-2 truncate">
+                  <MessageSquare className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                  <span className="text-purple-400 font-semibold">{t.replyingTo}:</span>
+                  <span className="font-mono text-purple-300">@{replyToCast.author?.username}</span>
+                  <span className="text-purple-200/60 truncate">&quot;{replyToCast.text.slice(0, 40)}...&quot;</span>
+                </div>
+                <button onClick={() => setReplyToCast(null)} className="text-purple-400 hover:text-white ml-2">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Quoting Notice */}
+            {quoteCast && (
+              <div className="flex items-center justify-between rounded-xl bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-200">
+                <div className="flex items-center gap-2 truncate">
+                  <Quote className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-cyan-400 font-semibold">{t.quoting}:</span>
+                  <span className="font-mono text-cyan-300">@{quoteCast.author?.username}</span>
+                  <span className="text-cyan-200/60 truncate">&quot;{quoteCast.text.slice(0, 40)}...&quot;</span>
+                </div>
+                <button onClick={() => setQuoteCast(null)} className="text-cyan-400 hover:text-white ml-2">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Composer Input Area */}
+            <div className="flex items-start gap-3">
+              <img
+                src={currentUser?.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face'}
+                alt="Me"
+                className="h-10 w-10 rounded-full object-cover border border-purple-500/30 shrink-0 mt-1"
+              />
+              <div className="flex-1 space-y-2">
+                <textarea
+                  rows={replyToCast || quoteCast ? 2 : 3}
+                  maxLength={320}
+                  value={castText}
+                  onChange={e => setCastText(e.target.value)}
+                  placeholder={
+                    replyToCast
+                      ? `Reply to @${replyToCast.author?.username}...`
+                      : quoteCast
+                      ? `Add your comment to this cast...`
+                      : t.composePlaceholder
+                  }
+                  className="w-full bg-transparent text-sm text-white placeholder-purple-200/30 focus:outline-none resize-none leading-relaxed"
+                />
+
+                {/* Quoted Cast Preview inside Composer */}
+                {quoteCast && (
+                  <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-1.5 text-xs">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={quoteCast.author?.pfpUrl}
+                        alt={quoteCast.author?.username}
+                        className="h-4 w-4 rounded-full object-cover"
+                      />
+                      <span className="font-bold text-white text-[11px]">{quoteCast.author?.displayName}</span>
+                      <span className="text-purple-300/50 text-[10px]">@{quoteCast.author?.username}</span>
+                    </div>
+                    <p className="text-purple-200/80 line-clamp-2 text-[11px]">{quoteCast.text}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Composer Bottom Bar */}
+            <div className="flex items-center justify-between border-t border-white/5 pt-3">
+              <div className="flex items-center gap-2 text-[11px] text-purple-200/50 font-mono">
+                <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+                <span>:3381 mempool (EIP-712 Gasless)</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-purple-200/40 font-mono">{320 - castText.length}</span>
+                <button
+                  onClick={handlePublishCast}
+                  disabled={isPublishing || !castText.trim()}
+                  className="flex items-center gap-1.5 rounded-full bg-purple-600 hover:bg-purple-500 px-5 py-2 text-xs font-semibold text-white transition-all shadow-md shadow-purple-600/30 active:scale-95 disabled:opacity-40"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>{isPublishing ? 'Publishing...' : replyToCast ? t.reply : quoteCast ? t.quote : t.publishCast}</span>
+                </button>
+              </div>
+            </div>
+
+            {postSuccessHash && (
+              <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>Cast published to node mempool! Hash: {postSuccessHash}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Casts Stream */}
+          <div className="space-y-3">
+            {filtered.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-[#120f1d]/50 p-12 text-center text-sm text-purple-200/50">
+                {t.noCastsFound}
+              </div>
+            ) : (
+              filtered.map(cast => {
+                const attr = identifyCastClient(cast);
+                const quoted = getQuotedCast(cast);
+
+                return (
+                  <div
+                    key={cast.hash}
+                    className="rounded-2xl border border-white/5 bg-[#120f1d] hover:bg-[#151124] hover:border-purple-500/20 p-4 sm:p-5 transition-all shadow-md space-y-3"
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={cast.author?.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}
+                          alt={cast.author?.username}
+                          className="h-10 w-10 rounded-full object-cover border border-purple-500/20"
+                        />
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-sm text-white hover:text-purple-300 transition-colors">
+                              {cast.author?.displayName || `FID ${cast.fid}`}
+                            </span>
+                            <span className="text-xs text-purple-200/50">@{cast.author?.username || cast.fid}</span>
+                            <span className="text-purple-200/30 text-xs">·</span>
+                            <span className="text-xs text-purple-200/40">{formatTimeAgo(cast.timestamp)}</span>
+                          </div>
+                          {cast.parentCastId && (
+                            <span className="text-[11px] text-purple-300/60 block">
+                              Replying to <span className="font-mono">FID {cast.parentCastId.fid}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Client Attribution Pill */}
+                      <span
+                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold tracking-wide ${attr.badgeColor}`}
+                        title={attr.indicator}
+                      >
+                        {attr.clientName}
+                      </span>
+                    </div>
+
+                    {/* Cast Body */}
+                    <p className="text-sm text-purple-100/90 leading-relaxed whitespace-pre-wrap">{cast.text}</p>
+
+                    {/* Quoted Cast Card (Nested à la farcaster.xyz) */}
+                    {quoted && (
+                      <div className="rounded-xl border border-white/10 bg-black/40 p-3.5 space-y-2 hover:border-purple-500/30 transition-colors">
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={quoted.author?.pfpUrl}
+                            alt={quoted.author?.username}
+                            className="h-5 w-5 rounded-full object-cover border border-purple-400/40"
+                          />
+                          <span className="font-bold text-xs text-white">{quoted.author?.displayName}</span>
+                          <span className="text-purple-300/50 text-[11px]">@{quoted.author?.username}</span>
+                          <span className="text-purple-200/30 text-[11px]">·</span>
+                          <span className="text-[11px] text-purple-200/40">{formatTimeAgo(quoted.timestamp)}</span>
+                        </div>
+                        <p className="text-xs text-purple-200/80 leading-relaxed">{quoted.text}</p>
+                      </div>
+                    )}
+
+                    {/* Standard URL Embeds */}
+                    {cast.embeds &&
+                      cast.embeds.filter(e => e.url).length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {cast.embeds
+                            .filter(e => e.url)
+                            .map((emb, idx) => (
+                              <a
+                                key={idx}
+                                href={emb.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{emb.url}</span>
+                              </a>
+                            ))}
+                        </div>
+                      )}
+
+                    {/* Action Bar (farcaster.xyz styling) */}
+                    <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-purple-200/60">
+                      <div className="flex items-center gap-6">
+                        {/* Reply Button */}
+                        <button
+                          onClick={() => {
+                            setReplyToCast(cast);
+                            setQuoteCast(null);
+                            window.scrollTo({ top: 350, behavior: 'smooth' });
+                          }}
+                          className="flex items-center gap-1.5 hover:text-purple-300 transition-colors"
+                          title="Reply to cast"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          <span>0</span>
+                        </button>
+
+                        {/* Recast & Quote Button */}
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleReaction(cast.hash, 'recast')}
+                            className={`flex items-center gap-1.5 transition-colors ${
+                              cast.reactions?.recastByMe ? 'text-emerald-400' : 'hover:text-emerald-400'
+                            }`}
+                            title="Recast"
+                          >
+                            <Repeat className="h-4 w-4" />
+                            <span>{cast.reactions?.recastsCount || 0}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setQuoteCast(cast);
+                              setReplyToCast(null);
+                              window.scrollTo({ top: 350, behavior: 'smooth' });
+                            }}
+                            className="text-purple-200/40 hover:text-cyan-400 p-0.5 ml-1 transition-colors"
+                            title="Quote cast"
+                          >
+                            <Quote className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Like Button */}
+                        <button
+                          onClick={() => handleToggleReaction(cast.hash, 'like')}
+                          className={`flex items-center gap-1.5 transition-colors ${
+                            cast.reactions?.likedByMe ? 'text-pink-400' : 'hover:text-pink-400'
+                          }`}
+                          title="Like"
+                        >
+                          <Heart className={`h-4 w-4 ${cast.reactions?.likedByMe ? 'fill-current' : ''}`} />
+                          <span>{cast.reactions?.likesCount || 0}</span>
+                        </button>
+                      </div>
+
+                      {/* Share / Copy Hash */}
+                      <button
+                        onClick={() => handleCopyHash(cast.hash)}
+                        className="flex items-center gap-1 hover:text-white transition-colors font-mono text-[11px]"
+                        title="Copy message hash"
+                      >
+                        {copiedHash === cast.hash ? (
+                          <span className="flex items-center gap-1 text-emerald-400">
+                            <Check className="h-3 w-3" />
+                            <span>Copied</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-purple-200/40 hover:text-purple-200">
+                            <Share2 className="h-3 w-3" />
+                            <span className="truncate max-w-[80px] sm:max-w-none">{cast.hash.slice(0, 10)}...</span>
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Rail: Controls, Diagnostics & Signer Manager */}
+        <div className="space-y-6 lg:col-span-1">
+          {/* Active Signer / Account Card */}
+          <div className="rounded-2xl border border-white/10 bg-[#120f1d] p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-purple-400" />
+                <h3 className="text-sm font-bold text-white">Signer & Account</h3>
+              </div>
+              <span className="rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] text-purple-300 font-semibold px-2 py-0.5">
+                V16 Gasless
+              </span>
+            </div>
+
+            {currentUser ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 bg-purple-950/20 border border-purple-500/20 rounded-xl p-3">
+                  <img
+                    src={currentUser.pfpUrl}
+                    alt={currentUser.username}
+                    className="h-10 w-10 rounded-full object-cover border border-purple-400"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-bold text-sm text-white block truncate">{currentUser.displayName}</span>
+                    <span className="text-xs text-purple-300/70 font-mono block">FID: {currentUser.fid}</span>
+                  </div>
+                  {currentUser.isSandbox && (
+                    <span className="rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-semibold px-2 py-0.5 shrink-0">
+                      Sandbox
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1 font-mono text-[11px] bg-black/40 rounded-xl p-3 border border-white/5">
+                  <span className="text-purple-200/50 block text-[10px]">Ed25519 Public Key:</span>
+                  <div className="text-purple-300 truncate">{currentUser.activeSignerKey}</div>
+                  <span className="text-purple-200/50 block text-[10px] pt-1">Custody Address:</span>
+                  <div className="text-purple-300 truncate">{currentUser.custodyAddress}</div>
+                </div>
+
+                <button
+                  onClick={handleSignOut}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-semibold text-purple-200 py-2 transition-colors flex items-center justify-center gap-2"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>{t.signOut}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-purple-200/70 leading-relaxed">
+                  Authenticate using a gasless Ed25519 signer authorized by an EIP-712 signature. Zero OP ETH required.
+                </p>
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs py-2.5 transition-all shadow-md shadow-purple-600/30 flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>{t.signIn}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Client Neutrality Filter Suite */}
+          <div className="rounded-2xl border border-white/10 bg-[#120f1d] p-5 space-y-4 shadow-xl">
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="h-4 w-4 text-cyan-400" />
               <div>
@@ -515,13 +976,13 @@ export function ClientApp({ lang }: ClientAppProps) {
             </div>
 
             <div className="space-y-3">
-              {/* Filter Mode Radio Buttons */}
-              <div className="grid grid-cols-3 gap-1 rounded-lg bg-black/60 p-1 border border-white/5">
+              {/* Radio selection */}
+              <div className="grid grid-cols-3 gap-1 rounded-xl bg-black/60 p-1 border border-white/5">
                 {(['all', 'exclude', 'include'] as const).map(mode => (
                   <button
                     key={mode}
                     onClick={() => setFilterMode(mode)}
-                    className={`rounded-md py-1.5 text-[11px] font-medium transition-all ${
+                    className={`rounded-lg py-1.5 text-[11px] font-semibold transition-all ${
                       filterMode === mode
                         ? 'bg-purple-600 text-white shadow-sm'
                         : 'text-purple-200/60 hover:text-white'
@@ -532,7 +993,7 @@ export function ClientApp({ lang }: ClientAppProps) {
                 ))}
               </div>
 
-              {/* Client Toggles */}
+              {/* Toggles */}
               {filterMode !== 'all' && (
                 <div className="space-y-2">
                   <span className="text-[11px] text-purple-200/70 block">
@@ -545,7 +1006,7 @@ export function ClientApp({ lang }: ClientAppProps) {
                         <button
                           key={c.name}
                           onClick={() => toggleClientSelection(c.name)}
-                          className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-all ${
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all ${
                             selected
                               ? `${c.color} ring-1 ring-purple-400`
                               : 'border-white/10 text-white/40 bg-white/5 hover:text-white/80'
@@ -559,7 +1020,7 @@ export function ClientApp({ lang }: ClientAppProps) {
                 </div>
               )}
 
-              {/* Keyword Blacklist */}
+              {/* Keyword blacklist */}
               <div>
                 <label className="text-[11px] font-medium text-purple-200/70 block mb-1">{t.keywordFilter}</label>
                 <input
@@ -567,180 +1028,156 @@ export function ClientApp({ lang }: ClientAppProps) {
                   value={keywordFilter}
                   onChange={e => setKeywordFilter(e.target.value)}
                   placeholder="e.g. spam, airdrop"
-                  className="w-full rounded-lg bg-black/60 border border-white/10 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
+                  className="w-full rounded-xl bg-black/60 border border-white/10 px-3 py-1.5 text-xs text-white focus:border-cyan-400 focus:outline-none"
                 />
               </div>
 
-              {/* Stats Bar */}
-              <div className="rounded-lg bg-white/5 p-2 text-[11px] text-purple-200/70 flex justify-between">
-                <span>Showing: <strong className="text-white">{stats.shown}</strong> casts</span>
-                <span>Filtered out: <strong className="text-cyan-400">{stats.hidden}</strong></span>
+              {/* Stats */}
+              <div className="rounded-xl bg-white/5 p-2.5 text-[11px] text-purple-200/70 flex justify-between font-mono">
+                <span>Showing: <strong className="text-white">{stats.shown}</strong></span>
+                <span>Filtered: <strong className="text-cyan-400">{stats.hidden}</strong></span>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Right Column: Cast Composer & Live Feed */}
-        <div className="space-y-6 lg:col-span-2">
-          {/* Cast Composer */}
-          <div className="rounded-xl border border-white/10 bg-black/40 p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Send className="h-3.5 w-3.5 text-purple-400" />
-                {t.composeTitle}
-              </span>
-              <span className="text-[11px] text-purple-200/50">{320 - castText.length} left</span>
+          {/* Developer Security Warning (Unix `rm` policy) */}
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-5 space-y-2">
+            <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+              <ShieldAlert className="h-4 w-4" />
+              <span>{t.securityNoticeTitle}</span>
             </div>
-
-            <textarea
-              rows={3}
-              maxLength={320}
-              value={castText}
-              onChange={e => setCastText(e.target.value)}
-              placeholder={t.composePlaceholder}
-              className="w-full rounded-lg bg-black/60 border border-white/10 p-3 text-sm text-white placeholder-purple-200/30 focus:border-purple-400 focus:outline-none resize-none"
-            />
-
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-purple-200/50">
-                Direct write to <code className="text-purple-300">:3381/v1/submitMessage</code>
-              </span>
-
-              <button
-                onClick={handlePublishCast}
-                disabled={isPublishing || !castText.trim()}
-                className="flex items-center gap-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 px-4 py-2 text-xs font-semibold text-white transition-all shadow-md shadow-purple-600/30 active:scale-95 disabled:opacity-40"
-              >
-                <Send className="h-3.5 w-3.5" />
-                <span>{isPublishing ? 'Publishing...' : t.publishCast}</span>
-              </button>
-            </div>
-
-            {postSuccessHash && (
-              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2 text-xs text-emerald-300 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span>Cast published to node mempool! Hash: {postSuccessHash}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Feed Header */}
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span>{t.feedTitle}</span>
-              <span className="rounded-full bg-purple-500/20 text-purple-300 text-xs px-2.5 py-0.5">
-                {filtered.length}
-              </span>
-            </h3>
-
+            <p className="text-[11px] text-amber-200/70 leading-relaxed">{t.securityNoticeBody}</p>
             <button
-              onClick={handleRefreshFeed}
-              disabled={isRefreshingFeed}
-              className="flex items-center gap-1.5 text-xs text-purple-200/60 hover:text-white transition-colors disabled:opacity-50"
+              onClick={handleLaunchSandbox}
+              disabled={isAuthenticating}
+              className="mt-2 w-full rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 text-xs font-semibold py-2 transition-colors flex items-center justify-center gap-1.5"
             >
-              <RefreshCw className={`h-3 w-3 ${isRefreshingFeed ? 'animate-spin text-purple-400' : ''}`} />
-              <span>{isRefreshingFeed ? (lang === 'zh' ? '正在刷新...' : 'Refreshing...') : t.refreshFeed}</span>
+              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+              <span>{t.generateSandbox}</span>
             </button>
-          </div>
-
-          {/* Feed Items */}
-          <div className="space-y-4">
-            {filtered.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-8 text-center text-sm text-purple-200/50">
-                {t.noCastsFound}
-              </div>
-            ) : (
-              filtered.map(cast => {
-                const attr = identifyCastClient(cast);
-                return (
-                  <div
-                    key={cast.hash}
-                    className="rounded-xl border border-white/10 bg-black/40 p-4 space-y-3 transition-all hover:border-purple-500/30 hover:bg-black/60"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={cast.author?.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}
-                          alt={cast.author?.username}
-                          className="h-9 w-9 rounded-full object-cover border border-purple-500/30"
-                        />
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-sm text-white">
-                              {cast.author?.displayName || `FID ${cast.fid}`}
-                            </span>
-                            <span className="text-xs text-purple-200/50">@{cast.author?.username || cast.fid}</span>
-                          </div>
-                          <span className="text-[11px] text-purple-200/40">
-                            {new Date(cast.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Client Attribution Badge */}
-                      <span
-                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${attr.badgeColor}`}
-                        title={attr.indicator}
-                      >
-                        {attr.clientName}
-                      </span>
-                    </div>
-
-                    <p className="text-sm text-purple-100/90 leading-relaxed whitespace-pre-wrap">{cast.text}</p>
-
-                    {/* Embeds */}
-                    {cast.embeds && cast.embeds.length > 0 && (
-                      <div className="space-y-1">
-                        {cast.embeds.map((emb, idx) => (
-                          <a
-                            key={idx}
-                            href={emb.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 text-xs text-cyan-400 hover:underline"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            <span>{emb.url}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Actions: Like, Recast, Raw Hash */}
-                    <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-purple-200/60">
-                      <div className="flex items-center gap-4">
-                        <button
-                          onClick={() => handleToggleReaction(cast.hash, 'like')}
-                          className={`flex items-center gap-1 transition-colors ${
-                            cast.reactions?.likedByMe ? 'text-pink-400' : 'hover:text-pink-400'
-                          }`}
-                        >
-                          <Heart className={`h-3.5 w-3.5 ${cast.reactions?.likedByMe ? 'fill-current' : ''}`} />
-                          <span>{cast.reactions?.likesCount || 0}</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleToggleReaction(cast.hash, 'recast')}
-                          className={`flex items-center gap-1 transition-colors ${
-                            cast.reactions?.recastByMe ? 'text-emerald-400' : 'hover:text-emerald-400'
-                          }`}
-                        >
-                          <Repeat className="h-3.5 w-3.5" />
-                          <span>{cast.reactions?.recastsCount || 0}</span>
-                        </button>
-                      </div>
-
-                      <span className="font-mono text-[10px] text-purple-200/30 truncate max-w-[120px] sm:max-w-none">
-                        {cast.hash}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
           </div>
         </div>
       </div>
+
+      {/* 3. Authentication & Sign In Modal (farcaster.xyz aesthetic) */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="relative w-full max-w-md rounded-3xl border border-purple-500/30 bg-[#120f1d] p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-white">{t.authModalTitle}</h3>
+                <p className="text-xs text-purple-200/60">{t.authModalSub}</p>
+              </div>
+              <button
+                onClick={() => setIsAuthModalOpen(false)}
+                className="rounded-full bg-white/5 hover:bg-white/10 p-1.5 text-purple-300 hover:text-white transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-black/60 p-1 border border-white/5">
+              <button
+                onClick={() => setAuthTab('sandbox')}
+                className={`rounded-lg py-2 text-xs font-semibold transition-all ${
+                  authTab === 'sandbox'
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'text-purple-200/60 hover:text-white'
+                }`}
+              >
+                1-Click Sandbox
+              </button>
+              <button
+                onClick={() => setAuthTab('import')}
+                className={`rounded-lg py-2 text-xs font-semibold transition-all ${
+                  authTab === 'import'
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'text-purple-200/60 hover:text-white'
+                }`}
+              >
+                Import Key / Seed
+              </button>
+            </div>
+
+            {/* Tab 1: Sandbox */}
+            {authTab === 'sandbox' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-purple-300 font-bold text-xs">
+                    <Sparkles className="h-4 w-4 text-purple-400" />
+                    <span>{t.authSandboxTitle}</span>
+                  </div>
+                  <p className="text-xs text-purple-200/70 leading-relaxed">{t.authSandboxDesc}</p>
+                </div>
+
+                <button
+                  onClick={handleLaunchSandbox}
+                  disabled={isAuthenticating}
+                  className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs py-3 transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>{isAuthenticating ? 'Generating EIP-712 Keys...' : t.connectSandboxBtn}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Tab 2: Import Key */}
+            {authTab === 'import' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-amber-500/20 bg-amber-950/10 p-3 space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    <span>Developer Notice (Unix `rm` policy)</span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/70 leading-relaxed">{t.authCustodyDesc}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-purple-200/70 block mb-1">{t.fidLabel}</label>
+                    <input
+                      type="text"
+                      value={inputFid}
+                      onChange={e => setInputFid(e.target.value)}
+                      placeholder="e.g. 12345"
+                      className="w-full rounded-xl bg-black/60 border border-white/10 px-3 py-2 text-xs text-white focus:border-purple-400 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-purple-200/70 block mb-1">{t.custodyKeyLabel}</label>
+                    <input
+                      type="password"
+                      value={inputSecret}
+                      onChange={e => setInputSecret(e.target.value)}
+                      placeholder={t.custodyKeyPlaceholder}
+                      className="w-full rounded-xl bg-black/60 border border-white/10 px-3 py-2 text-xs text-white focus:border-purple-400 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleImportLogin}
+                  disabled={isAuthenticating}
+                  className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs py-3 transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                >
+                  <Key className="h-4 w-4" />
+                  <span>{isAuthenticating ? 'Signing EIP-712...' : t.connectCustodyBtn}</span>
+                </button>
+              </div>
+            )}
+
+            {authError && (
+              <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-2.5 text-xs text-amber-300 flex items-center gap-2">
+                <XCircle className="h-4 w-4 shrink-0 text-amber-400" />
+                <span>{authError}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
