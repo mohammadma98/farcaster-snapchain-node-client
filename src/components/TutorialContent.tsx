@@ -104,7 +104,7 @@ export function TutorialContent({ lang }: TutorialContentProps) {
             <div>2. Client sends HTTP POST binary protobuf to local read node: <code className="text-cyan-300">http://127.0.0.1:3381/v1/submitMessage</code></div>
             <div>3. Read node validates Ed25519 signature, checks FID storage rent limits, and checks nonce.</div>
             <div>4. If valid, read node injects the message into its local <strong>mempool</strong>.</div>
-            <div>5. Read node gossips the message via libp2p (:3383) to validator peers.</div>
+            <div>5. Read node gossips the message via libp2p (:3382) to validator peers.</div>
             <div>6. Validators include message in the next Snapchain block.</div>
           </div>
         </div>

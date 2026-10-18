@@ -19,7 +19,7 @@ export function QuickstartCard({ lang }: QuickstartCardProps) {
       desc: t.cmd0Desc,
       icon: Cpu,
       cmd: 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash',
-      details: 'Sets up Docker engine, opens ports 22, 3381 (HTTP), 3382 (gRPC), 3383 (gossip), tunes sysctl buffers.',
+      details: 'Sets up Docker engine, opens ports 22, 3381 (HTTP), 3382 (gossip), 3383 (gRPC), tunes sysctl buffers.',
     },
     {
       title: t.cmd1Title,

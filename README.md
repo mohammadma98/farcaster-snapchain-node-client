@@ -20,7 +20,7 @@ Run these three commands sequentially on any clean Ubuntu 22.04+ instance or AWS
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash
 ```
-*Configures Docker Engine, sets up UFW firewall (ports 22, 3381 HTTP, 3382 gRPC, 3383 gossip), and tunes Linux kernel network buffers for p2p throughput.*
+*Configures Docker Engine, sets up UFW firewall (ports 22, 3381 HTTP, 3382 gossip, 3383 gRPC), and tunes Linux kernel network buffers for p2p throughput.*
 
 ### 1. Setup & Bootstrap Standalone Read Node
 ```bash
@@ -40,7 +40,7 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 
 | Feature | Description | Protocol Standard |
 | :--- | :--- | :--- |
-| **Zero API Keys** | Connects directly to local read node via `:3381` (HTTP) and `:3383` (libp2p gossip). No Neynar, Alchemy, or Infura accounts required. | Decentralized P2P Mesh |
+| **Zero API Keys** | Connects directly to local read node via `:3381` (HTTP) and `:3382` (libp2p gossip). No Neynar, Alchemy, or Infura accounts required. | Decentralized P2P Mesh |
 | **Gasless Signers** | Generates Ed25519 app keys authorized via off-chain EIP-712 signatures from the custody account. Zero Optimism ETH or gas fees. | Snapchain Engine V16 |
 | **Community Filtering** | Include or exclude casts originating from specific clients (Warpcast, Supercast, Phaver, Herocast) or keywords to curate custom communities. | Client-Neutral Curation |
 | **Read Node Writes** | Directly submits signed binary protobuf messages to `:3381/v1/submitMessage`. Read nodes gossip writes into validator mempools. | Libp2p Mempool Gossip |
@@ -63,7 +63,7 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 │                       Standalone Read Node (:3381)                          │
 │   (Dockerized Snapchain Read Node  •  Zero API Keys  •  Local Mempool)      │
 └───────────────────────┬─────────────────────────────▲───────────────────────┘
-                        │ libp2p Gossip (:3383)       │ Block Synchronization
+                        │ libp2p Gossip (:3382)       │ Block Synchronization
                         │ (mempool topic)             │ (Tendermint / CometBFT)
                         ▼                             │
 ┌─────────────────────────────────────────────────────┴───────────────────────┐
