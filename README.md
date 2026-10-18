@@ -46,8 +46,6 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 | **Read Node Writes** | Directly submits signed binary protobuf messages to `:3381/v1/submitMessage`. Read nodes gossip writes into validator mempools. | Libp2p Mempool Gossip |
 | **Developer Security Warning** | Explicit warning framing seed phrase entry as developer testing tool (analogous to `rm -rf` in Unix) with sandbox test generator. | Cryptographic Sandbox Standard |
 | **Bilingual Support (EN / 中文)** | Instant toggle between fluent English and 简体中文 across documentation, tutorial, and interactive UI. | Global Internationalization (i18n) |
-| **59s Video Storyboard** | Storyboard and timestamped voiceover script formatted for 9:16 vertical video presentation. | Community Media Standard |
-| **Peer Verification Kit** | 3-minute testing checklist and pre-formatted Farcaster cast templates for human peer review. | Peer Review Standard |
 
 ---
 
@@ -139,45 +137,6 @@ Build the production Next.js microsite:
 ```bash
 npm run build
 ```
-
----
-
-## 🤝 Peer Verification & Community Endorsement Guide
-
-For developers and node operators wishing to verify reproducible execution and peer-review this suite:
-
-### 3-Minute Verification Checklist:
-1. **Clone & Test**: Run `git clone https://github.com/mohammadma98/farcaster-snapchain-node-client.git && cd farcaster-snapchain-node-client && npm install && npm test`.
-2. **Verify Quickstart**: Confirm `scripts/0-provision-compute.sh`, `scripts/1-setup-read-node.sh`, and `scripts/2-create-client.sh` boot a read node with zero API keys.
-3. **Test Web Client**: Start `npm run dev` and open `http://localhost:3000`. Click "Generate Sandbox Test Account", then "Issue Gasless App Key (EIP-712)" and test client filtering toggles (e.g. Exclude Warpcast).
-
-### Peer Endorsement Template on Farcaster:
-```
-I just tested out the sovereign Farcaster Snapchain Read Node & Client suite by @mohammadma98.
-
-Tested on an AWS Ubuntu instance:
-1. 3-command setup worked cleanly out of the box (zero third-party API keys).
-2. Gasless signers generated flawlessly via EIP-712 without OP gas.
-3. Client filtering (excluding Warpcast / custom feeds) works exactly as specified.
-4. Full bilingual docs (EN + 中文) and responsive UI.
-
-Vouching for this build! 🫡💜
-https://github.com/mohammadma98/farcaster-snapchain-node-client
-```
-
----
-
-## 🎬 59-Second Video Storyboard
-
-Formatted for 9:16 vertical video presentation (Farcaster, X, YouTube Shorts):
-
-| Timestamp | Scene | Visual Action | Voiceover Script |
-| :--- | :--- | :--- | :--- |
-| **00:00 - 00:08** | **Hook** | Dynamic title card showing the decentralization trilemma, transitioning to terminal cursor. | *"How do you launch your own sovereign Farcaster node and client with zero paid API keys in under 60 seconds?"* |
-| **00:08 - 00:22** | **3-Command Quickstart** | Terminal split screen. 3 commands executed. Docker container spins up. `:3381/v1/info` returns green `200 OK`. | *"Three simple commands: provision compute, launch the official Snapchain Docker read node, and launch the client."* |
-| **00:22 - 00:36** | **Gasless Signers** | Web browser loads client. User clicks 'Generate Sandbox Test Account', then 'Issue Gasless App Key'. EIP-712 signature appears. | *"No Optimism ETH needed. Since Snapchain V16, app keys are gasless via off-chain EIP-712 custody signatures."* |
-| **00:36 - 00:48** | **Client Filtering** | User selects 'Exclude Warpcast' toggle. The feed instantly filters out Warpcast posts, highlighting pure Snapchain native messages. | *"Want your own custom community? Filter out Warpcast or Supercast with a single click."* |
-| **00:48 - 00:59** | **Open Source & Outro** | Rapid montage: Live node health ping (green), full Chinese translation toggle (中文), and GitHub MIT License. | *"Fully open-source under MIT, complete with full English and Chinese documentation. Check the link in the description!"* |
 
 ---
 

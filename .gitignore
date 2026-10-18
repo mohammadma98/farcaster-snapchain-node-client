@@ -29,6 +29,9 @@ dist
 docs/
 notes/
 plan/
+agents.md
+AGENTS.md
+agents/
 *.plan
 *.notes
 
