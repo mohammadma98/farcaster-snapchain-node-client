@@ -23,7 +23,7 @@ echo -e "${BLUE}${BOLD}        (1) Set up a Standalone Snapchain Read Node      
 echo -e "${BLUE}${BOLD}================================================================${NC}"
 
 SNAPCHAIN_DIR="${HOME}/snapchain"
-NODE_OPERATOR_FID="${1:-37}" # Default to 37 (balajis) or user specified FID
+NODE_OPERATOR_FID="${1:-2}" # Default operator FID or user specified FID
 
 echo -e "Target installation directory: ${BOLD}${SNAPCHAIN_DIR}${NC}"
 echo -e "Operator FID for upgrade schedule: ${BOLD}${NODE_OPERATOR_FID}${NC}"

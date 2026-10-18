@@ -390,7 +390,7 @@ export function ClientApp({ lang }: ClientAppProps) {
             </div>
           </div>
 
-          {/* Community Filter Controls (Balaji's Key Specification) */}
+          {/* Community Filter Controls (Client Neutrality Engine) */}
           <div className="rounded-xl border border-white/10 bg-black/40 p-5 space-y-4">
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="h-4 w-4 text-cyan-400" />

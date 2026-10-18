@@ -19,20 +19,20 @@ export function VoucherGuide({ lang }: VoucherGuideProps) {
         </div>
         <div>
           <h3 className="text-xl font-bold text-white">
-            {isZh ? '见证人背书指南 (Voucher Endorsement Guide)' : 'Human Voucher Endorsement Guide'}
+            {isZh ? '同行验证与社区背书指南 (Peer Verification Guide)' : 'Peer Verification & Community Endorsement Guide'}
           </h3>
           <span className="text-xs text-purple-200/50">
             {isZh
-              ? '按照 Balaji 规则：由一位已验证的真人测试本教程并发表背书 کست'
-              : 'Per Balaji rule: Verified human tests the tutorial and posts an endorsement cast'}
+              ? '由开源社区同行或节点操作者测试本套件并发表公开验证 Cast'
+              : 'Reproducible verification steps for peer reviewers and node operators'}
           </span>
         </div>
       </div>
 
       <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-4 text-xs text-purple-200/90 leading-relaxed">
         {isZh
-          ? 'Balaji 在第一条 কست 中明确要求：提交时必须附带一条来自已验证真人（如 0xael.eth 或社区开发者）的背书 کست，证明其按照 3 步教程成功运行了节点并测试了客户端。'
-          : 'Balaji’s official prize specification states: "The best submission would be accompanied by a link to a cast from a verified human who was willing to vouch for it, after testing out the tutorial and client herself."'}
+          ? '为确保开源软件的可重现性与密码学健壮性，欢迎社区开发者按照此 3 分钟清单对本地 Snapchain 只读节点与无 Gas 客户端进行独立复现测试并发表背书。'
+          : 'To guarantee software reproducibility and cryptographic integrity, community developers and node operators can use this 3-minute checklist to independently verify and peer-review the local Snapchain read node and client.'}
       </div>
 
       <div className="space-y-4">
@@ -77,7 +77,7 @@ export function VoucherGuide({ lang }: VoucherGuideProps) {
           {isZh ? '见证人推荐背书 Cast 模板：' : 'Recommended Voucher Cast Template on Farcaster:'}
         </span>
         <div className="rounded-xl border border-purple-500/20 bg-black/90 p-4 font-mono text-xs text-purple-200 select-all leading-relaxed">
-          I just tested out the Farcaster Snapchain Read Node & Client suite submitted by @your_username for @balajis's challenge.
+          I just tested out the sovereign Farcaster Snapchain Read Node & Client suite by @mohammadma98.
           <br /><br />
           Tested on an AWS Ubuntu box:
           <br />
@@ -89,7 +89,9 @@ export function VoucherGuide({ lang }: VoucherGuideProps) {
           <br />
           4. Full bilingual docs (EN + 中文) and responsive UI.
           <br /><br />
-          Vouching for this submission! 🫡💜
+          Vouching for this build! 🫡💜
+          <br />
+          https://github.com/mohammadma98/farcaster-snapchain-node-client
         </div>
       </div>
     </div>

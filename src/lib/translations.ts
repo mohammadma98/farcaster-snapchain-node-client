@@ -4,7 +4,7 @@ export const translations = {
   en: {
     title: 'Farcaster Snapchain Suite',
     subtitle: 'Standalone Read Node & Sovereign Client with Gasless Signers',
-    heroTag: 'Zero API Keys • MIT Licensed • Balaji Challenge Specification',
+    heroTag: 'Zero API Keys • MIT Licensed • 100% Sovereign Infrastructure',
     heroDesc:
       'Run a standalone Farcaster Snapchain read node on AWS or any Linux VPS with zero third-party API keys. Build and use a sovereign client that issues gasless app keys via EIP-712 and filters out casts from any client to craft your own custom community.',
     quickstartTitle: 'Quickstart: 3 Commands to Full Sovereignty',
@@ -83,7 +83,7 @@ export const translations = {
   zh: {
     title: 'Farcaster Snapchain 套件',
     subtitle: '独立只读节点与具备无Gas应用密钥的自主客户端',
-    heroTag: '零API密钥 • MIT 开源协议 • Balaji 挑战赛全指标实现',
+    heroTag: '零API密钥 • MIT 开源协议 • 100% 自主去中心化基础设施',
     heroDesc:
       '在 AWS 或任何 Linux VPS 上运行一个完全独立的 Farcaster Snapchain 只读节点，无需任何第三方 API 密钥。构建并使用自主客户端，通过 EIP-712 发行无 Gas 签发者，并自由包含或排除来自特定客户端（如 Warpcast、Supercast）的内容，构建属于你自己的去中心化社区。',
     quickstartTitle: '快速入门：3条命令实现完全主权',

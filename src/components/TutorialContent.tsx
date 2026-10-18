@@ -161,8 +161,8 @@ export function TutorialContent({ lang }: TutorialContentProps) {
           </div>
           <p className="text-amber-200/80 leading-relaxed text-[11px]">
             {lang === 'zh'
-              ? 'Balaji 特别指出：在开源开发者客户端中输入助记词或私钥，在安全哲学上类似于在 Unix 中执行 `rm` 命令——它给予开发者完全的底层自由度，但也要求必须仅在测试账号中使用。切勿在开发环境中输入存放高价值资产的冷钱包！'
-              : 'Balaji specifically emphasized framing seed phrase entry with clear developer warnings: like `rm` in Unix, developer software exposes raw cryptographic control for testing and development. Always use dedicated test accounts with sandbox FIDs rather than personal high-value cold wallets.'}
+              ? '在开源底层开发工具中直接操作助记词或私钥，在安全哲学上类似于在 Unix 中执行 `rm` 命令——它赋予开发者完全的底层控制权，但也要求必须仅在测试环境中使用。切勿在开发环境中输入存放高价值资产的冷钱包！'
+              : 'Entering seed phrases or private keys in low-level developer software is philosophically equivalent to running `rm -rf` in Unix: it grants unmediated cryptographic control for development and testing. Always use dedicated test accounts with sandbox FIDs rather than personal high-value cold wallets.'}
           </p>
         </div>
       </section>
@@ -175,14 +175,14 @@ export function TutorialContent({ lang }: TutorialContentProps) {
           </div>
           <div>
             <h3 className="text-xl font-bold text-white">{t.clientFilterTheoryTitle}</h3>
-            <span className="text-xs text-purple-200/50">Balaji Community Specification • Source Attribution • Sovereign Curation</span>
+            <span className="text-xs text-purple-200/50">Decentralized Social Architecture • Source Attribution • Sovereign Curation</span>
           </div>
         </div>
 
         <p className="text-sm text-purple-200/80">
           {lang === 'zh'
-            ? 'Balaji 在挑战需求中特别指明：客户端必须能够包含或排除来自任何其他客户端（如 Warpcast、Supercast）的内容，以此让用户能够构建属于自己的独特社区。'
-            : 'In his prize specification, Balaji explicitly instructed: "You can also build the client to do things like include or exclude casts from any other client (like Warpcast or Supercast) so as to make your own community."'}
+            ? '去中心化协议的核心设计要求之一：客户端必须能够自由包含或排除来自任何其他客户端（如 Warpcast、Supercast）的内容，以此让各个去中心化子群体能够构建属于自己的独特社区。'
+            : 'A foundational pillar of decentralized social networks: clients must be able to include or exclude casts from any other client (such as Warpcast or Supercast) so that sovereign communities can curate their own social graphs.'}
         </p>
 
         <div className="space-y-3 text-xs text-purple-200/70">

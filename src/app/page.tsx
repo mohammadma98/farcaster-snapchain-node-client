@@ -189,12 +189,12 @@ export default function HomePage() {
               {t.videoScriptLink}
             </button>
             <a
-              href="https://farcaster.xyz/balajis.eth/0x50184b62"
+              href="https://snapchain.farcaster.xyz"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-purple-300 transition-colors flex items-center gap-1"
             >
-              <span>Balaji Cast</span>
+              <span>Snapchain Protocol</span>
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>

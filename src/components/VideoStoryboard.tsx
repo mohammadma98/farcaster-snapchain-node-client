@@ -15,7 +15,7 @@ export function VideoStoryboard({ lang }: VideoStoryboardProps) {
     {
       time: '00:00 - 00:08',
       title: isZh ? '第 1 幕：核心痛点与挑战' : 'Scene 1: The Problem & The Hook',
-      visual: 'Close-up of Balaji’s cast announcing the $2,048 prize on Farcaster, followed by terminal window opening.',
+      visual: 'Dynamic title card demonstrating the decentralization trilemma, followed by terminal window opening.',
       voiceover: isZh
         ? '“如何只用 3 条命令，不买任何 API 密钥，在 60 秒内运行你自己的 Farcaster 节点？”'
         : '"How do you run your own sovereign Farcaster node and client with zero API keys in under 60 seconds?"',
@@ -41,7 +41,7 @@ export function VideoStoryboard({ lang }: VideoStoryboardProps) {
       title: isZh ? '第 4 幕：客户端过滤引擎' : 'Scene 4: Client Filtering Engine',
       visual: 'Toggle "Exclude Warpcast" filter. Feed instantly updates, filtering out Warpcast posts and highlighting native Snapchain messages.',
       voiceover: isZh
-        ? '“按 Balaji 要求，支持自由包含或排除来自 Warpcast 或 Supercast 的内容，定制你自己的专属去中心化社区。”'
+        ? '“支持自由包含或排除来自 Warpcast 或 Supercast 的内容，定制你自己的专属去中心化社区。”'
         : '"Filter out Warpcast or Supercast with a single click to curate your own autonomous community."',
     },
     {
