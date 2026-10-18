@@ -41,11 +41,11 @@ MODE="${1:-setup}"
 
 # 2. System Hardware Specification Verification
 check_system_specs() {
-    echo -e "\n${CYAN}${BOLD}[1/4] Verifying hardware specifications...${NC}"
+    echo -e "\n${CYAN}${BOLD}• Verifying hardware specifications...${NC}"
     
     # Check CPU Cores
     CPUS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
-    echo -e "  • CPU Cores: ${BOLD}${CPUS}${NC} (Recommended: 4+)"
+    echo -e "  - CPU Cores: ${BOLD}${CPUS}${NC} (Recommended: 4+)"
 
     # Check RAM
     if [ -f /proc/meminfo ]; then
@@ -54,11 +54,11 @@ check_system_specs() {
     else
         RAM_GB=16 # fallback
     fi
-    echo -e "  • System Memory: ${BOLD}${RAM_GB} GB${NC} (Recommended: 16 GB+)"
+    echo -e "  - System Memory: ${BOLD}${RAM_GB} GB${NC} (Recommended: 16 GB+)"
 
     # Check Disk Space
     DISK_GB=$(df -BG . | tail -1 | awk '{print $4}' | tr -d 'G')
-    echo -e "  • Available Storage: ${BOLD}${DISK_GB} GB${NC} (Recommended: ~2000 GB / 2 TB)"
+    echo -e "  - Available Storage: ${BOLD}${DISK_GB} GB${NC} (Recommended: ~2000 GB / 2 TB)"
 
     if [ "$CPUS" -lt 4 ]; then
         echo -e "  ${YELLOW}⚠ Warning: CPU cores (${CPUS}) is below the recommended 4 cores. Synchronization may be slower.${NC}"
@@ -75,10 +75,10 @@ check_system_specs() {
 
 # 3. Install Docker Engine & Container Runtime
 configure_docker() {
-    echo -e "\n${CYAN}${BOLD}[2/4] Verifying and configuring Docker Engine...${NC}"
+    echo -e "\n${CYAN}${BOLD}• Verifying and configuring Docker Engine...${NC}"
 
     if ! command -v docker &> /dev/null; then
-        echo "  • Docker not detected. Installing official Docker Engine..."
+        echo "  - Docker not detected. Installing official Docker Engine..."
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
         $SUDO sh /tmp/get-docker.sh
         rm -f /tmp/get-docker.sh
@@ -100,7 +100,7 @@ configure_docker() {
 
 # 4. Configure Firewall & Network Ports
 configure_firewall() {
-    echo -e "\n${CYAN}${BOLD}[3/4] Configuring firewall and opening required ports...${NC}"
+    echo -e "\n${CYAN}${BOLD}• Configuring firewall and opening required ports...${NC}"
 
     if command -v ufw &> /dev/null; then
         # Ensure SSH is open first so operator is never locked out
@@ -123,7 +123,7 @@ configure_firewall() {
 
 # 5. Kernel & Network Tuning for P2P Throughput
 tune_kernel_buffers() {
-    echo -e "\n${CYAN}${BOLD}[4/4] Tuning Linux kernel network buffers for P2P gossip throughput...${NC}"
+    echo -e "\n${CYAN}${BOLD}• Tuning Linux kernel network buffers for P2P gossip throughput...${NC}"
 
     # Set real-time parameters
     $SUDO sysctl -w fs.file-max=2097152 > /dev/null 2>&1 || true
