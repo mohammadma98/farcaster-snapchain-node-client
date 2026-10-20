@@ -30,6 +30,12 @@ prompt_user() {
     local default_val="$2"
     local response=""
 
+    # Support automated non-interactive overrides
+    if [ "${FORCE:-false}" == "true" ] || [ "${ASSUME_YES:-false}" == "true" ] || [ "${FORCE_INSTALL:-false}" == "true" ]; then
+        echo "y"
+        return 0
+    fi
+
     printf "%b" "$prompt_msg" >&2
 
     if [ -t 0 ]; then
@@ -106,7 +112,7 @@ if [ "${PROVISIONED:-false}" != "true" ]; then
     exit 1
 fi
 
-if [ "${HARDWARE_SUPPORTED:-true}" != "true" ]; then
+if [ "${HARDWARE_SUPPORTED:-true}" != "true" ] && [ "${LOW_SPEC_MODE:-false}" != "true" ]; then
     echo -e "\n${RED}${BOLD}[FATAL ERROR] Server hardware does not meet minimum operational requirements.${NC}"
     echo -e "${RED}Snapchain Read Node cannot run on this machine.${NC}"
     exit 1
@@ -122,11 +128,27 @@ else
 fi
 
 if [ "$CPUS" -lt 2 ] || [ "$RAM_GB" -lt 4 ]; then
-    echo -e "\n${RED}${BOLD}[FATAL ERROR] Hardware resources are insufficient to run Snapchain Read Node.${NC}"
-    echo -e "  - Minimum Required: 2 CPU Cores, 4 GB RAM"
-    echo -e "  - Detected System:  ${CPUS} CPU Cores, ${RAM_GB} GB RAM"
-    echo -e "${RED}Execution blocked. Please upgrade server resources.${NC}"
-    exit 1
+    if [ "${LOW_SPEC_MODE:-false}" == "true" ]; then
+        echo -e "\n  ${YELLOW}${BOLD}⚠ Running in Low-Resource Compatibility Mode (${CPUS} CPU, ${RAM_GB} GB RAM).${NC}"
+        echo -e "  ${YELLOW}Notice: Snapshot extraction and block synchronization will be significantly slower.${NC}"
+    else
+        echo -e "\n${YELLOW}${BOLD}================================================================${NC}"
+        echo -e "${YELLOW}${BOLD}  ⚠ Low Hardware Resources Detected (${CPUS} CPU, ${RAM_GB} GB RAM)      ${NC}"
+        echo -e "${YELLOW}${BOLD}================================================================${NC}"
+        echo -e "  - Minimum Standard: 2 CPU Cores, 4 GB RAM"
+        echo -e "  - Detected System:  ${BOLD}${CPUS} CPU Cores, ${RAM_GB} GB RAM${NC}"
+        echo -e "  ${YELLOW}Warning: Running below minimum specifications will make block sync and RocksDB operations very slow.${NC}\n"
+        CONFIRM_PROCEED=$(prompt_user "Do you want to continue anyway? [y/N]: " "n")
+        case "$CONFIRM_PROCEED" in
+            [yY]|[yY][eE][sS])
+                echo -e "  ${GREEN}✓ Proceeding in low-resource mode.${NC}"
+                ;;
+            *)
+                echo -e "${RED}[ABORTED] Node setup stopped by operator. Please upgrade server resources.${NC}"
+                exit 1
+                ;;
+        esac
+    fi
 fi
 
 # ------------------------------------------------------------------------------

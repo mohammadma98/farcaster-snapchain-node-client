@@ -49,6 +49,12 @@ prompt_user() {
         return 0
     fi
 
+    # Support automated non-interactive overrides
+    if [ "${FORCE:-false}" == "true" ] || [ "${ASSUME_YES:-false}" == "true" ] || [ "${FORCE_INSTALL:-false}" == "true" ]; then
+        echo "y"
+        return 0
+    fi
+
     # Output prompt message to stderr so user sees it in terminal without polluting subshell stdout
     printf "%b" "$prompt_msg" >&2
 
@@ -175,27 +181,41 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${CYAN}${BOLD}[3/5] Evaluating Hardware Sufficiency...${NC}"
 
-# Critical Insufficiency Check (Cannot install on critically low hardware)
-if [ "$CPUS" -lt "$MIN_CPUS" ] || [ "$RAM_GB" -lt "$MIN_RAM_GB" ]; then
-    echo -e "${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}${BOLD}[FATAL ERROR] Insufficient Server Hardware Resources!${NC}"
-    echo -e "${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}This script cannot be installed on this server.${NC}"
-    echo -e "Snapchain Read Node and Tendermint engine require minimum hardware to operate without crashing:"
-    echo -e "  - Minimum Required: ${BOLD}${MIN_CPUS} CPU Cores, ${MIN_RAM_GB} GB RAM${NC}"
-    echo -e "  - Detected System:  ${BOLD}${CPUS} CPU Cores, ${RAM_GB} GB RAM${NC}"
-    echo -e "  - Official Specs:   ${BOLD}${REC_CPUS}+ CPU Cores, ${REC_RAM_GB}+ GB RAM, 1.5 TB SSD${NC}\n"
-    echo -e "${RED}Installation terminated. Please upgrade this server to meet minimum requirements.${NC}"
-    
-    # Invalidate any prior configuration
-    $SUDO rm -f /etc/snapchain/snapchain.conf 2>/dev/null || true
-    exit 1
-fi
+LOW_SPEC_MODE=false
 
-# Warning & Confirmation for Sub-optimal Resources
-HARDWARE_SUBOPTIMAL=0
-if [ "$CPUS" -lt "$REC_CPUS" ] || [ "$RAM_GB" -lt "$REC_RAM_GB" ]; then
-    HARDWARE_SUBOPTIMAL=1
+# Critical Insufficiency Check with Operator Override
+if [ "$CPUS" -lt "$MIN_CPUS" ] || [ "$RAM_GB" -lt "$MIN_RAM_GB" ]; then
+    echo -e "${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "${YELLOW}${BOLD} [CRITICAL HARDWARE WARNING] Server Is Below Minimum Specs!     ${NC}"
+    echo -e "${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "Detected specifications are BELOW the minimum standard operational requirements:"
+    echo -e "  - Detected System:  ${BOLD}${RED}${CPUS} CPU Cores, ${RAM_GB} GB RAM${NC}"
+    echo -e "  - Minimum Standard: ${BOLD}${MIN_CPUS} CPU Cores, ${MIN_RAM_GB} GB RAM${NC}"
+    echo -e "  - Official Specs:   ${BOLD}${REC_CPUS}+ CPU Cores, ${REC_RAM_GB}+ GB RAM, 1.5 TB SSD${NC}\n"
+    echo -e "${RED}${BOLD}⚠ Severe Performance Degradation & Resource Notice:${NC}"
+    if [ "$CPUS" -lt "$MIN_CPUS" ]; then
+        echo -e "  • ${RED}CPU Bottleneck (${CPUS} Core):${NC} Snapshot extraction, block validation, and RocksDB compactions will be ${BOLD}EXTREMELY SLOW${NC}."
+    fi
+    if [ "$RAM_GB" -lt "$MIN_RAM_GB" ]; then
+        echo -e "  • ${RED}Memory Pressure (${RAM_GB} GB):${NC} Tendermint consensus and libp2p gossip mesh may suffer heavy memory load or ${BOLD}Out-Of-Memory (OOM) termination${NC}."
+    fi
+    echo -e "  • Initial state sync may take several days, and real-time transaction ingestion (/v1/submitMessage) may experience delays."
+    echo -e "  • System may experience high load averages and occasional unresponsiveness under peak network traffic.\n"
+
+    if [ "$MODE" != "check" ]; then
+        CONFIRM_LOW_SPEC=$(prompt_user "Do you understand the performance risks and wish to proceed anyway? [y/N]: " "n")
+        case "$CONFIRM_LOW_SPEC" in
+            [yY]|[yY][eE][sS])
+                echo -e "  ${GREEN}✓ Operator confirmation received. Continuing in low-resource compatibility mode.${NC}\n"
+                LOW_SPEC_MODE=true
+                ;;
+            *)
+                echo -e "${RED}[ABORTED] Installation stopped by operator. Please upgrade server resources (min 2 vCPUs, 4 GB RAM).${NC}"
+                exit 1
+                ;;
+        esac
+    fi
+elif [ "$CPUS" -lt "$REC_CPUS" ] || [ "$RAM_GB" -lt "$REC_RAM_GB" ]; then
     echo -e "  ${YELLOW}${BOLD}⚠ Hardware Warning: Server is below official recommended specs:${NC}"
     if [ "$CPUS" -lt "$REC_CPUS" ]; then
         echo -e "    • CPU Cores (${CPUS}) is below recommended ${REC_CPUS}+ cores. Block synchronization and RocksDB compaction will be slower."
@@ -204,21 +224,21 @@ if [ "$CPUS" -lt "$REC_CPUS" ] || [ "$RAM_GB" -lt "$REC_RAM_GB" ]; then
         echo -e "    • System RAM (${RAM_GB} GB) is below recommended ${REC_RAM_GB} GB+. Tendermint consensus may experience memory pressure during high gossip volume."
     fi
     echo -e "  ${YELLOW}Server meets minimum operational threshold (${MIN_CPUS} Cores / ${MIN_RAM_GB} GB RAM), but performance may degrade.${NC}\n"
-    
+
     if [ "$MODE" != "check" ]; then
         CONFIRM_RES=$(prompt_user "Do you want to confirm and proceed with this configuration? [y/N]: " "n")
         case "$CONFIRM_RES" in
             [yY]|[yY][eE][sS])
-                echo -e "  ${GREEN}✓ Operator confirmation received. Proceeding with installation.${NC}"
+                echo -e "  ${GREEN}✓ Operator confirmation received. Proceeding with installation.${NC}\n"
                 ;;
             *)
                 echo -e "${RED}[ABORTED] Installation stopped by operator.${NC}"
-                exit 0
+                exit 1
                 ;;
         esac
     fi
 else
-    echo -e "  ${GREEN}✓ CPU cores and System RAM satisfy all recommended specifications.${NC}"
+    echo -e "  ${GREEN}✓ CPU cores and System RAM satisfy all recommended specifications.${NC}\n"
 fi
 
 # ------------------------------------------------------------------------------
@@ -246,16 +266,54 @@ done < <(df -P -BG 2>/dev/null | awk -v min_gb="$MIN_DISK_GB" 'NR>1 && $1 ~ /^\/
 TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
 
 if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
-    echo -e "${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}${BOLD}[FATAL ERROR] Insufficient Free Storage Space!${NC}"
-    echo -e "${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}No storage volume on this server has at least ${MIN_DISK_GB} GB of free space.${NC}"
+    echo -e "${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "${YELLOW}${BOLD}  ⚠ Storage Warning: Free Space Below Recommended 100 GB       ${NC}"
+    echo -e "${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "${YELLOW}No storage volume on this server has at least ${MIN_DISK_GB} GB of free space.${NC}"
     echo -e "Official Snapchain specification requires ${BOLD}${REC_DISK_GB} GB (1.5 TB SSD)${NC} for archive retention,"
-    echo -e "and an absolute minimum of ${BOLD}${MIN_DISK_GB} GB${NC} to download initial snapshots and initialize RocksDB."
-    echo -e "\nDetected block partitions:"
-    df -h -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null || df -h
-    echo -e "\n${RED}Please attach additional storage (e.g., 500 GB - 2 TB NVMe/SSD) and re-run.${NC}"
-    exit 1
+    echo -e "and an absolute minimum of ${BOLD}${MIN_DISK_GB} GB${NC} to download snapshots without risk of disk exhaustion."
+    echo -e "\n${YELLOW}Searching for mounted volumes with at least 5 GB available...${NC}"
+
+    while IFS='|' read -r m_mount m_avail m_total m_used m_device; do
+        if [ -n "$m_mount" ] && [ "${m_avail:-0}" -ge 5 ]; then
+            ELIGIBLE_MOUNTS+=("${m_mount}|${m_avail}|${m_total}|${m_used}|${m_device}")
+        fi
+    done < <(df -P -BG 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
+        avail = $4; gsub(/[^0-9]/, "", avail);
+        total = $2;
+        used = $3;
+        device = $1;
+        mount = $6;
+        print mount "|" avail "|" total "|" used "|" device;
+    }' | sort -t'|' -k2,2rn || true)
+
+    TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
+
+    if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
+        echo -e "\n${RED}${BOLD}================================================================${NC}"
+        echo -e "${RED}${BOLD}[FATAL ERROR] Insufficient Free Storage Space (< 5 GB)!         ${NC}"
+        echo -e "${RED}${BOLD}================================================================${NC}"
+        echo -e "${RED}Server has less than 5 GB of free space across all block devices.${NC}"
+        echo -e "Cannot continue because Docker containers and Snapchain base files require working space.\n"
+        echo -e "Detected block partitions:"
+        df -h -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null || df -h
+        echo -e "\n${RED}Please free up disk space and re-run.${NC}"
+        exit 1
+    fi
+
+    if [ "$MODE" != "check" ]; then
+        echo -e "${YELLOW}Operating on constrained storage (< 100 GB) may fill up during snapshot extraction.${NC}"
+        CONFIRM_DISK=$(prompt_user "Do you want to proceed with available storage anyway? [y/N]: " "n")
+        case "$CONFIRM_DISK" in
+            [yY]|[yY][eE][sS])
+                echo -e "  ${GREEN}✓ Operator confirmation received. Proceeding with available storage.${NC}\n"
+                ;;
+            *)
+                echo -e "${RED}[ABORTED] Installation stopped by operator. Please expand storage.${NC}"
+                exit 1
+                ;;
+        esac
+    fi
 fi
 
 SELECTED_MOUNT=""
@@ -359,6 +417,40 @@ echo -e "  ${GREEN}✓ Target directory verified and writable:${NC} ${BOLD}${SEL
 # ------------------------------------------------------------------------------
 echo -e "\n${CYAN}${BOLD}[5/5] Configuring System Services & Runtime Environment...${NC}"
 
+# Virtual Memory & Swap Optimization for Low-RAM Systems (< 4 GB)
+if [ "$RAM_GB" -lt 4 ]; then
+    echo -e "  • Evaluating virtual memory & swap allocation..."
+    SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
+    if [ "$SWAP_TOTAL_KB" -lt 1048576 ]; then
+        echo -e "    ${YELLOW}Notice: Server has limited RAM (${RAM_GB} GB) and less than 1 GB swap.${NC}"
+        ROOT_FREE_GB=$(df -P -BG / 2>/dev/null | awk 'NR==2 {gsub(/[^0-9]/, "", $4); print $4}' || echo 0)
+        if [ "$ROOT_FREE_GB" -ge 4 ]; then
+            CREATE_SWAP=$(prompt_user "    Create a 2 GB swapfile to protect against Out-Of-Memory (OOM) crashes? [Y/n]: " "y")
+            case "$CREATE_SWAP" in
+                [yY]|[yY][eE][sS]|"")
+                    echo -e "    Allocating 2 GB swapfile at /swapfile..."
+                    $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
+                    if [ -f /swapfile ]; then
+                        $SUDO chmod 600 /swapfile
+                        $SUDO mkswap /swapfile > /dev/null 2>&1 || true
+                        $SUDO swapon /swapfile > /dev/null 2>&1 || true
+                        if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
+                            echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab > /dev/null
+                        fi
+                        echo -e "    ${GREEN}✓ 2 GB swapfile active and persisted in /etc/fstab.${NC}"
+                    fi
+                    ;;
+                *)
+                    echo -e "    ${YELLOW}Skipping swap creation. Note: Node may be killed by OOM-killer during peak load.${NC}"
+                    ;;
+            esac
+        fi
+    else
+        SWAP_GB=$(( SWAP_TOTAL_KB / 1024 / 1024 ))
+        echo -e "    ${GREEN}✓ Active swap detected (${SWAP_GB} GB).${NC}"
+    fi
+fi
+
 # Docker Engine & Compose
 echo -e "  • Verifying Docker Engine & Container Runtime..."
 if ! command -v docker &> /dev/null; then
@@ -441,6 +533,7 @@ cat <<EOF | $SUDO tee /etc/snapchain/snapchain.conf > /dev/null
 # Generated by 0-provision-compute.sh
 PROVISIONED=true
 HARDWARE_SUPPORTED=true
+LOW_SPEC_MODE="${LOW_SPEC_MODE:-false}"
 PROVISION_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 SNAPCHAIN_DATA_DIR="${SELECTED_SNAPCHAIN_DIR}"
 SELECTED_MOUNT="${SELECTED_MOUNT}"
