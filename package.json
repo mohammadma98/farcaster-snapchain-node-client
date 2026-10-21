@@ -8,9 +8,9 @@
     "url": "https://github.com/mohammadma98/farcaster-snapchain-node-client.git"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0 -p 3000",
     "cli": "tsx src/cli/index.ts",
     "test": "tsx test/protocol.test.ts"
   },
