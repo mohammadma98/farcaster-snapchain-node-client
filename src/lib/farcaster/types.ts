@@ -30,6 +30,8 @@ export interface FarcasterUser {
   bio?: string;
   custodyAddress?: string;
   hasStorage?: boolean;
+  followerCount?: number;
+  followingCount?: number;
 }
 
 export interface FarcasterCast {
@@ -71,6 +73,8 @@ export interface UserSession {
   expiresAt: number;
   isSandbox?: boolean;
   bio?: string;
+  followerCount?: number;
+  followingCount?: number;
 }
 
 import { MessageType } from '@farcaster/core';

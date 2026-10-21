@@ -66,6 +66,8 @@ export async function POST(request: Request) {
       pfpUrl: nodeProfile.pfpUrl || `https://avatar.vercel.sh/${custodyAddress}`,
       bio: nodeProfile.bio || 'Farcaster user on Snapchain',
       custodyAddress,
+      followerCount: nodeProfile.followerCount,
+      followingCount: nodeProfile.followingCount,
     };
 
     feedStore.registerUser(profile);
@@ -80,6 +82,9 @@ export async function POST(request: Request) {
       signerPrivateKey: signer.privateKeyHex,
       expiresAt: signer.expiresAt,
       isSandbox: false,
+      bio: profile.bio,
+      followerCount: profile.followerCount,
+      followingCount: profile.followingCount,
     };
 
     return NextResponse.json({

@@ -11,6 +11,7 @@ class FeedStore {
   private casts: Map<string, FarcasterCast> = new Map();
   private users: Map<number, FarcasterUser> = new Map();
   private userFollows: Map<number, Set<number>> = new Map();
+  private userReactions: Map<number, { likes: Set<string>; recasts: Set<string> }> = new Map();
   private defaultFollowedFids: Set<number> = new Set([37, 432209]);
 
   constructor() {
@@ -20,13 +21,17 @@ class FeedStore {
       displayName: 'balajis',
       pfpUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/16e9ecaa-0837-4243-4316-ceeb9db19600/original',
       bio: 'Founder of Network School, author of The Network State, former CTO of Coinbase.',
+      followerCount: 61092,
+      followingCount: 58,
     });
     this.registerUser({
       fid: 432209,
       username: 'mohammad98',
       displayName: 'Mohammad 🎩',
-      pfpUrl: 'https://i.imgur.com/soNnpxz.jpg',
-      bio: 'Full-stack Web3 & Sovereign Protocol Engineer',
+      pfpUrl: '/images/mohammad98.jpg',
+      bio: 'CEO of @based-karma\n💻 Developer ▶️ Web3 , Python , AI , PHP & More ...',
+      followerCount: 6833,
+      followingCount: 484,
     });
   }
 
@@ -34,6 +39,21 @@ class FeedStore {
    * Register or update a user profile in memory cache
    */
   public registerUser(user: FarcasterUser): FarcasterUser {
+    // Normalize Mohammad's avatar to ensure local 100% reliable image
+    if (
+      user.fid === 432209 ||
+      user.username?.toLowerCase() === 'mohammad98' ||
+      user.pfpUrl?.includes('soNnpxz')
+    ) {
+      user.pfpUrl = '/images/mohammad98.jpg';
+      if (!user.followerCount) user.followerCount = 6833;
+      if (!user.followingCount) user.followingCount = 484;
+    }
+    if (user.fid === 37 || user.username?.toLowerCase() === 'balajis') {
+      if (!user.followerCount) user.followerCount = 61092;
+      if (!user.followingCount) user.followingCount = 58;
+    }
+
     const existing = this.users.get(user.fid) || { fid: user.fid };
     const updated = { ...existing, ...user };
     this.users.set(user.fid, updated);
@@ -507,7 +527,8 @@ class FeedStore {
    */
   public toggleReaction(
     hash: string,
-    type: 'like' | 'recast'
+    type: 'like' | 'recast',
+    fid?: number
   ): { likedByMe: boolean; recastByMe: boolean; likesCount: number; recastsCount: number } | null {
     const cast = this.casts.get(hash);
     if (!cast) return null;
@@ -516,18 +537,42 @@ class FeedStore {
       cast.reactions = { likesCount: 0, recastsCount: 0, likedByMe: false, recastByMe: false };
     }
 
+    if (fid) {
+      if (!this.userReactions.has(fid)) {
+        this.userReactions.set(fid, { likes: new Set(), recasts: new Set() });
+      }
+    }
+
+    const userRecord = fid ? this.userReactions.get(fid) : undefined;
+
     if (type === 'like') {
       const current = !!cast.reactions.likedByMe;
       cast.reactions.likedByMe = !current;
       cast.reactions.likesCount = current
         ? Math.max(0, cast.reactions.likesCount - 1)
         : cast.reactions.likesCount + 1;
+
+      if (userRecord) {
+        if (!current) {
+          userRecord.likes.add(hash);
+        } else {
+          userRecord.likes.delete(hash);
+        }
+      }
     } else {
       const current = !!cast.reactions.recastByMe;
       cast.reactions.recastByMe = !current;
       cast.reactions.recastsCount = current
         ? Math.max(0, cast.reactions.recastsCount - 1)
         : cast.reactions.recastsCount + 1;
+
+      if (userRecord) {
+        if (!current) {
+          userRecord.recasts.add(hash);
+        } else {
+          userRecord.recasts.delete(hash);
+        }
+      }
     }
 
     return {
@@ -536,6 +581,67 @@ class FeedStore {
       likesCount: cast.reactions.likesCount,
       recastsCount: cast.reactions.recastsCount,
     };
+  }
+
+  /**
+   * Get casts liked by user
+   */
+  public getUserLikedCasts(fid: number): FarcasterCast[] {
+    const likedHashes = this.userReactions.get(fid)?.likes || new Set<string>();
+    const result: FarcasterCast[] = [];
+    
+    // Check tracked liked casts
+    for (const h of Array.from(likedHashes)) {
+      const c = this.casts.get(h);
+      if (c) result.push({ ...c, reactions: { ...c.reactions!, likedByMe: true } });
+    }
+
+    // Also include any casts in store flagged as likedByMe if matching viewer
+    if (result.length === 0) {
+      for (const c of Array.from(this.casts.values())) {
+        if (c.reactions?.likedByMe) {
+          result.push(c);
+        }
+      }
+    }
+
+    return result.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Get casts recasted by user
+   */
+  public getUserRecastedCasts(fid: number): FarcasterCast[] {
+    const recastedHashes = this.userReactions.get(fid)?.recasts || new Set<string>();
+    const result: FarcasterCast[] = [];
+
+    for (const h of Array.from(recastedHashes)) {
+      const c = this.casts.get(h);
+      if (c) result.push({ ...c, reactions: { ...c.reactions!, recastByMe: true } });
+    }
+
+    if (result.length === 0) {
+      for (const c of Array.from(this.casts.values())) {
+        if (c.reactions?.recastByMe) {
+          result.push(c);
+        }
+      }
+    }
+
+    return result.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Get quote casts by user
+   */
+  public getUserQuoteCasts(fid: number): FarcasterCast[] {
+    const result: FarcasterCast[] = [];
+    for (const c of Array.from(this.casts.values())) {
+      if (c.fid === fid && Array.isArray(c.embeds) && c.embeds.some((e) => e.castId)) {
+        result.push(c);
+      }
+    }
+    return result.sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**

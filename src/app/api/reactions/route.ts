@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Update local state
-    const reactionState = feedStore.toggleReaction(targetHash, type);
+    const reactionState = feedStore.toggleReaction(targetHash, type, fid);
 
     return NextResponse.json({
       status: 'ok',
