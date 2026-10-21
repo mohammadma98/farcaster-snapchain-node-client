@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
     const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
-    // 2. Resolve FID accurately from username or numeric FID
+    // 2. Resolve FID: Automatically from Custody Address, or via optional manual override
     let userFid = 0;
     let resolvedUsername = '';
 
@@ -64,14 +64,19 @@ export async function POST(request: Request) {
         }
       }
     } else {
-      // User didn't enter username or FID
-      return NextResponse.json(
-        {
-          status: 'error',
-          error: 'Please enter your Farcaster username (e.g. @mohammad98) or FID to bind your custody keys to your onchain account.',
-        },
-        { status: 400 }
-      );
+      // Automatic resolution from Custody Address (Warpcast standard flow)
+      const detectedFid = await defaultNodeClient.resolveFidByCustodyAddress(custodyAddress, targetNodeUrl);
+      if (detectedFid && detectedFid > 0) {
+        userFid = detectedFid;
+      } else {
+        return NextResponse.json(
+          {
+            status: 'error',
+            error: `No registered Farcaster account was found on the network for this custody address (${custodyAddress}). Make sure you are using your official 24-word Farcaster/Warpcast seed phrase, or create a Sandbox Dev Account for local testing.`,
+          },
+          { status: 404 }
+        );
+      }
     }
 
     // 3. Issue Gasless Ed25519 Signer via EIP-712 from Custody Address

@@ -1022,8 +1022,8 @@ export function ClientApp({ lang }: ClientAppProps) {
 
       {/* 3. Authentication & Sign In Modal (farcaster.xyz aesthetic) */}
       {isAuthModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="relative w-full max-w-md rounded-3xl border border-purple-500/30 bg-[#120f1d] p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="relative w-full max-w-md rounded-3xl border border-purple-500/30 bg-[#120f1d] p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 my-auto max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between">
               <div>

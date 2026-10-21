@@ -7,22 +7,26 @@ import { bytesToHex, hexToBytes, toHex } from 'viem';
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 /**
- * Generate a standard 12-word BIP-39 mnemonic seed phrase
+ * Generate a standard 24-word BIP-39 mnemonic seed phrase (256 bits entropy)
  */
 export function generateDevMnemonic(): string {
-  return generateMnemonic(english);
+  return generateMnemonic(english, 256);
 }
 
 /**
- * Validate mnemonic seed phrase (must be 12 or 24 words)
+ * Validate mnemonic seed phrase (24 words standard, 12 words accepted)
  */
 export function validateMnemonic(mnemonic: string): { isValid: boolean; wordCount: number; error?: string } {
   const clean = mnemonic.trim();
   if (!clean) return { isValid: false, wordCount: 0, error: 'Mnemonic cannot be empty' };
   const words = clean.split(/\s+/);
   const wordCount = words.length;
-  if (wordCount !== 12 && wordCount !== 24) {
-    return { isValid: false, wordCount, error: `Invalid word count (${wordCount}). Seed phrase must have 12 or 24 words.` };
+  if (wordCount !== 24 && wordCount !== 12) {
+    return {
+      isValid: false,
+      wordCount,
+      error: `Detected ${wordCount} words. Farcaster recovery phrases require 24 words (standard) or 12 words.`,
+    };
   }
   return { isValid: true, wordCount };
 }

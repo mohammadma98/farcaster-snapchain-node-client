@@ -13,8 +13,21 @@ import {
   fromFarcasterTime,
   CastType,
 } from '@farcaster/core';
+import { createPublicClient, http } from 'viem';
+import { optimism } from 'viem/chains';
 import { FarcasterCast, FarcasterUser, SnapchainInfo } from './types';
 import { identifyCastClient } from './client-filter';
+
+const ID_REGISTRY_ADDRESS = '0x00000000fc6c5f01fc30151999387bb99a9f489b';
+const ID_REGISTRY_ABI = [
+  {
+    name: 'idOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
 
 export interface NodeHealthResult {
   isOnline: boolean;
@@ -111,6 +124,66 @@ export class SnapchainNodeClient {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Automatically resolve FID from Ethereum Custody Address.
+   * 1. Direct query to local Snapchain / Hubble node HTTP API (/v1/onChainIdRegistryEventByAddress)
+   * 2. Decentralized on-chain fallback to Optimism IdRegistry contract (idOf)
+   */
+  async resolveFidByCustodyAddress(
+    custodyAddress: string,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<number | null> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanAddress = (custodyAddress || '').trim().toLowerCase();
+    if (!cleanAddress.startsWith('0x') || cleanAddress.length !== 42) {
+      return null;
+    }
+
+    // 1. Try local Snapchain / Hubble node endpoint
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/onChainIdRegistryEventByAddress?address=${cleanAddress}`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const fid = data?.fid || data?.idRegistryEvent?.fid;
+        if (typeof fid === 'number' && fid > 0) {
+          return fid;
+        }
+      }
+    } catch {
+      // Local node might be offline, syncing, or has no on-chain event cache yet
+    }
+
+    // 2. Query Optimism Mainnet IdRegistry contract directly via viem
+    try {
+      const client = createPublicClient({
+        chain: optimism,
+        transport: http('https://mainnet.optimism.io', { timeout: 6000 }),
+      });
+
+      const fidBigInt = await client.readContract({
+        address: ID_REGISTRY_ADDRESS,
+        abi: ID_REGISTRY_ABI,
+        functionName: 'idOf',
+        args: [cleanAddress as `0x${string}`],
+      });
+
+      const fid = Number(fidBigInt);
+      if (fid > 0) {
+        return fid;
+      }
+    } catch (onchainErr) {
+      console.warn('Could not query Optimism IdRegistry contract for FID:', onchainErr);
+    }
+
+    return null;
   }
 
   /**

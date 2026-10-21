@@ -1565,13 +1565,14 @@ export function FarcasterClient() {
         </div>
       </div>
 
-      {/* Login Modal */}
+      {/* Login Modal (Responsive & Scrollable for all screen heights) */}
       {isAuthModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="relative w-full max-w-lg">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto p-3 sm:p-6 flex min-h-full items-center justify-center">
+          <div className="relative w-full max-w-lg my-auto py-2">
             <button
               onClick={() => setIsAuthModalOpen(false)}
-              className="absolute -top-3 -right-3 z-10 p-1.5 rounded-full bg-white border border-slate-200 text-slate-500 hover:text-slate-800 shadow-md"
+              className="hidden sm:flex absolute -top-3 -right-3 z-20 p-1.5 rounded-full bg-white border border-slate-200 text-slate-500 hover:text-slate-800 shadow-md hover:scale-105 transition-all"
+              title="Close modal"
             >
               <X className="h-4 w-4" />
             </button>

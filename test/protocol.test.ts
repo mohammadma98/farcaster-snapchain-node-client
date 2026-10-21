@@ -77,10 +77,16 @@ async function runTests() {
 
   console.log('\n--- 3. Testing Mnemonic & Cryptographic Key Derivation ---');
   const devMnemonic = generateDevMnemonic();
-  console.log('Generated 12-word Mnemonic:', devMnemonic.split(' ').length, 'words');
+  console.log('Generated 24-word Mnemonic:', devMnemonic.split(' ').length, 'words');
   const validCheck = validateMnemonic(devMnemonic);
-  if (!validCheck.isValid || validCheck.wordCount !== 12) {
-    throw new Error('Mnemonic validation failed');
+  if (!validCheck.isValid || validCheck.wordCount !== 24) {
+    throw new Error('24-word Mnemonic validation failed');
+  }
+
+  const legacy12 = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
+  const legacyCheck = validateMnemonic(legacy12);
+  if (!legacyCheck.isValid || legacyCheck.wordCount !== 12) {
+    throw new Error('12-word legacy validation failed');
   }
 
   const custody = deriveCustodyFromMnemonic(devMnemonic);
