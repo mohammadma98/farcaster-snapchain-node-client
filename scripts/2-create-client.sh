@@ -55,32 +55,33 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}Checking and freeing port 3000...${NC}"
 
-# Kill any existing next / node web processes
-pkill -9 -f "next dev" 2>/dev/null || true
-pkill -9 -f "next start" 2>/dev/null || true
-pkill -9 -f "next-server" 2>/dev/null || true
-pkill -9 -f "node.*3000" 2>/dev/null || true
-
-# Port release via fuser, lsof, ss
+# Safely kill processes holding port 3000
 if command -v fuser &> /dev/null; then
     fuser -k -9 3000/tcp 2>/dev/null || true
 fi
 
 if command -v lsof &> /dev/null; then
-    for pid in $(lsof -ti:3000 2>/dev/null || echo ""); do
-        if [ -n "$pid" ]; then
+    for pid in $(lsof -ti:3000 2>/dev/null || true); do
+        if [ -n "$pid" ] && [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
 fi
 
 if command -v ss &> /dev/null; then
-    for pid in $(ss -tlpn '( sport = :3000 )' 2>/dev/null | grep -oP 'pid=\K[0-9]+' || echo ""); do
-        if [ -n "$pid" ]; then
+    for pid in $(ss -tlpn '( sport = :3000 )' 2>/dev/null | grep -oP 'pid=\K[0-9]+' || true); do
+        if [ -n "$pid" ] && [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
 fi
+
+# Cleanly stop any existing Next.js web instances, never killing our own process tree
+for pid in $(pgrep -f "next-(server|dev|start)" 2>/dev/null || true); do
+    if [ -n "$pid" ] && [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+done
 
 sleep 1
 
@@ -149,6 +150,7 @@ if [ "$CLIENT_TYPE" == "cli" ]; then
     npm run cli
 else
     echo -e "\n${CYAN}${BOLD}Building production Next.js application bundle...${NC}"
+    export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=2048"
     npm run build
 
     # Detect public IP for user convenience

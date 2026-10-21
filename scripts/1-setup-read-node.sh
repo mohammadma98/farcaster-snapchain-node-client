@@ -693,8 +693,13 @@ case "$AUTO_STEP2" in
             exec bash "./scripts/2-create-client.sh"
         elif [ -f "./2-create-client.sh" ]; then
             exec bash "./2-create-client.sh"
+        elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
+            exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
         else
-            exec bash -c "$(curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh)"
+            TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
+            curl -fsSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh -o "$TMP_SCRIPT"
+            chmod +x "$TMP_SCRIPT"
+            exec bash "$TMP_SCRIPT"
         fi
         ;;
     *)
