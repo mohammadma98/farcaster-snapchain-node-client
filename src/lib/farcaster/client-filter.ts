@@ -16,53 +16,37 @@ export function identifyCastClient(cast: {
   embeds?: Array<{ url?: string; castId?: any }>;
   hash?: string;
   clientSource?: string;
+  isLocal?: boolean;
 }): ClientAttribution {
-  // If already tagged by signer or upstream metadata, return it
-  if (cast.clientSource) {
-    if (cast.clientSource === 'Warpcast') {
-      return { clientName: 'Warpcast', badgeColor: 'bg-purple-500/10 text-purple-400 border-purple-500/20', confidence: 'high', indicator: 'Signer metadata / Channel origin' };
-    }
-    if (cast.clientSource === 'Supercast') {
-      return { clientName: 'Supercast', badgeColor: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20', confidence: 'high', indicator: 'Supercast App Key / embed' };
-    }
-    if (cast.clientSource === 'Phaver') {
-      return { clientName: 'Phaver', badgeColor: 'bg-pink-500/10 text-pink-400 border-pink-500/20', confidence: 'high', indicator: 'Phaver protocol signature' };
-    }
-    if (cast.clientSource === 'Direct Snapchain') {
-      return { clientName: 'Direct Snapchain', badgeColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20', confidence: 'high', indicator: 'Native node submission' };
-    }
-  }
-
   const text = cast.text || '';
   const parentUrl = cast.parentUrl || '';
   const embeds = cast.embeds || [];
   const embedUrls = embeds.map(e => e.url || '').filter(Boolean);
 
-  // 1. Supercast detection
+  // 1. Direct local client submissions via Snapchain node
+  if (cast.isLocal || (cast.clientSource === 'Direct Snapchain' && (cast.hash?.startsWith('0xlocal') || !cast.parentUrl?.includes('warpcast.com')))) {
+    // If it was explicitly marked as Direct Snapchain from composer, keep Direct Snapchain
+    if (cast.clientSource === 'Direct Snapchain') {
+      return {
+        clientName: 'Direct Snapchain',
+        badgeColor: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+        confidence: 'high',
+        indicator: 'Native Snapchain node submission',
+      };
+    }
+  }
+
+  // 2. Supercast detection
   if (
-    embedUrls.some(u => u.includes('supercast.xyz')) ||
+    embedUrls.some(u => u.includes('supercast.xyz') || u.includes('supercast.mypinata.cloud')) ||
     text.includes('via @supercast') ||
     text.includes('supercast.xyz')
   ) {
     return {
       clientName: 'Supercast',
-      badgeColor: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+      badgeColor: 'text-indigo-700 bg-indigo-50 border-indigo-200',
       confidence: 'high',
-      indicator: 'Supercast embed / signature',
-    };
-  }
-
-  // 2. Warpcast detection
-  if (
-    parentUrl.includes('warpcast.com') ||
-    embedUrls.some(u => u.includes('warpcast.com')) ||
-    embedUrls.some(u => u.includes('client.warpcast.com'))
-  ) {
-    return {
-      clientName: 'Warpcast',
-      badgeColor: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-      confidence: 'high',
-      indicator: 'Warpcast channel / embed',
+      indicator: 'Supercast App Key / embed',
     };
   }
 
@@ -70,45 +54,85 @@ export function identifyCastClient(cast: {
   if (
     embedUrls.some(u => u.includes('phaver.com')) ||
     text.includes('phaver.com') ||
-    text.includes('Shared via @phaver')
+    text.includes('Shared via @phaver') ||
+    text.includes('via Phaver')
   ) {
     return {
       clientName: 'Phaver',
-      badgeColor: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
+      badgeColor: 'text-pink-700 bg-pink-50 border-pink-200',
       confidence: 'high',
-      indicator: 'Phaver embed',
+      indicator: 'Phaver protocol signature',
     };
   }
 
-  // 4. Herocast detection
+  // 4. Paragraph detection
+  if (
+    embedUrls.some(u => u.includes('paragraph.xyz')) ||
+    text.includes('paragraph.xyz')
+  ) {
+    return {
+      clientName: 'Paragraph',
+      badgeColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      confidence: 'high',
+      indicator: 'Paragraph article publication',
+    };
+  }
+
+  // 5. Bountycaster detection
+  if (
+    embedUrls.some(u => u.includes('bountycaster.xyz')) ||
+    text.toLowerCase().includes('bountycaster')
+  ) {
+    return {
+      clientName: 'Bountycaster',
+      badgeColor: 'text-amber-700 bg-amber-50 border-amber-200',
+      confidence: 'high',
+      indicator: 'Bountycaster bounty publication',
+    };
+  }
+
+  // 6. Herocast detection
   if (
     embedUrls.some(u => u.includes('herocast.xyz')) ||
     text.includes('via @herocast')
   ) {
     return {
       clientName: 'Herocast',
-      badgeColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      badgeColor: 'text-orange-700 bg-orange-50 border-orange-200',
       confidence: 'high',
       indicator: 'Herocast signature',
     };
   }
 
-  // 5. Paragraph / Paragraph.xyz blog cast
-  if (embedUrls.some(u => u.includes('paragraph.xyz'))) {
+  // 7. Jam detection
+  if (embedUrls.some(u => u.includes('jam.so'))) {
     return {
-      clientName: 'Paragraph',
-      badgeColor: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-      confidence: 'medium',
-      indicator: 'Paragraph article publication',
+      clientName: 'Jam',
+      badgeColor: 'text-violet-700 bg-violet-50 border-violet-200',
+      confidence: 'high',
+      indicator: 'Jam audio cast',
     };
   }
 
-  // 6. Direct Snapchain / Custom Native Client (No intermediary branding)
+  // 8. Explicit local client source
+  if (cast.clientSource === 'Direct Snapchain') {
+    return {
+      clientName: 'Direct Snapchain',
+      badgeColor: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+      confidence: 'high',
+      indicator: 'Native Snapchain node submission',
+    };
+  }
+
+  // 9. Warpcast detection & standard network casts
+  // Warpcast is the primary default client of the Farcaster network.
+  // Casts with imagedelivery.net (Cloudflare / Warpcast images), channel links (chain:// or warpcast.com/~/channel),
+  // or standard network broadcasts originate from Warpcast.
   return {
-    clientName: 'Direct Snapchain',
-    badgeColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-    confidence: 'inferred',
-    indicator: 'Raw protocol message',
+    clientName: 'Warpcast',
+    badgeColor: 'text-purple-700 bg-purple-50 border-purple-200',
+    confidence: 'high',
+    indicator: 'Warpcast client broadcast',
   };
 }
 

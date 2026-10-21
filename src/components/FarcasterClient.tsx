@@ -24,9 +24,6 @@ import {
   X,
   Lock,
   Layers,
-  Terminal,
-  ChevronDown,
-  ChevronUp,
   UserPlus,
   UserCheck,
   AlertCircle,
@@ -34,6 +31,67 @@ import {
 } from 'lucide-react';
 import { FarcasterCast, FarcasterUser, UserSession } from '@/lib/farcaster/types';
 import { LoginPage } from './LoginPage';
+
+const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
+  {
+    fid: 37,
+    username: 'balajis',
+    displayName: 'balajis',
+    pfpUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/16e9ecaa-0837-4243-4316-ceeb9db19600/original',
+    bio: 'Founder of Network School, author of The Network State, former CTO of Coinbase.',
+  },
+  {
+    fid: 432209,
+    username: 'mohammad98',
+    displayName: 'Mohammad 🎩',
+    pfpUrl: 'https://i.imgur.com/soNnpxz.jpg',
+    bio: 'Full-stack Web3 & Sovereign Protocol Engineer',
+  },
+];
+
+function getClientBadgeColor(source?: string) {
+  switch (source) {
+    case 'Direct Snapchain':
+      return 'text-cyan-700 bg-cyan-50 border-cyan-200';
+    case 'Supercast':
+      return 'text-indigo-700 bg-indigo-50 border-indigo-200';
+    case 'Phaver':
+      return 'text-pink-700 bg-pink-50 border-pink-200';
+    case 'Paragraph':
+      return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+    case 'Bountycaster':
+      return 'text-amber-700 bg-amber-50 border-amber-200';
+    case 'Herocast':
+      return 'text-orange-700 bg-orange-50 border-orange-200';
+    case 'Jam':
+      return 'text-violet-700 bg-violet-50 border-violet-200';
+    case 'Warpcast':
+    default:
+      return 'text-purple-700 bg-purple-50 border-purple-200';
+  }
+}
+
+function getClientDotColor(source?: string) {
+  switch (source) {
+    case 'Direct Snapchain':
+      return 'bg-cyan-500';
+    case 'Supercast':
+      return 'bg-indigo-500';
+    case 'Phaver':
+      return 'bg-pink-500';
+    case 'Paragraph':
+      return 'bg-emerald-500';
+    case 'Bountycaster':
+      return 'bg-amber-500';
+    case 'Herocast':
+      return 'bg-orange-500';
+    case 'Jam':
+      return 'bg-violet-500';
+    case 'Warpcast':
+    default:
+      return 'bg-purple-500';
+  }
+}
 
 export function FarcasterClient() {
   // Navigation / Views
@@ -55,10 +113,6 @@ export function FarcasterClient() {
     version?: string;
   }>({ isOnline: false, latencyMs: 0 });
   const [isPinging, setIsPinging] = useState(false);
-
-  // Quickstart Top Bar Banner (Directive 1 Compliance)
-  const [isQuickstartOpen, setIsQuickstartOpen] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   // Feed State
   const [casts, setCasts] = useState<FarcasterCast[]>([]);
@@ -91,9 +145,9 @@ export function FarcasterClient() {
   const [searchResults, setSearchResults] = useState<FarcasterUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Suggested Follows
-  const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>([]);
-  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([2, 3, 37]));
+  // Suggested Follows (balajis first, mohammad98 second)
+  const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>(DEFAULT_SUGGESTED_USERS);
+  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([37, 432209]));
 
   // Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -118,12 +172,30 @@ export function FarcasterClient() {
     // Restore session from localStorage if exists
     try {
       const saved = localStorage.getItem('farcaster_session');
-      if (saved) {
-        setSession(JSON.parse(saved));
-      }
       const savedNode = localStorage.getItem('farcaster_node_url');
       if (savedNode) {
         setNodeUrl(savedNode);
+      }
+      if (saved) {
+        const parsed: UserSession = JSON.parse(saved);
+        setSession(parsed);
+        // Refresh session profile in background to ensure authentic username & avatar
+        fetch(`/api/users/${parsed.fid}?nodeUrl=${encodeURIComponent(savedNode || nodeUrl)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.user) {
+              const updatedSession: UserSession = {
+                ...parsed,
+                username: data.user.username || parsed.username,
+                displayName: data.user.displayName || parsed.displayName,
+                pfpUrl: data.user.pfpUrl || parsed.pfpUrl,
+                bio: data.user.bio || parsed.bio,
+              };
+              setSession(updatedSession);
+              localStorage.setItem('farcaster_session', JSON.stringify(updatedSession));
+            }
+          })
+          .catch(() => {});
       }
     } catch {
       // ignore
@@ -190,16 +262,26 @@ export function FarcasterClient() {
     }
   }, [nodeUrl, sourceFilter]);
 
-  // 4. Fetch Suggested Users
+  // 4. Fetch Suggested Users (Strictly balajis and mohammad98)
   const fetchSuggestedUsers = async () => {
     try {
       const res = await fetch(`/api/users/search?q=&nodeUrl=${encodeURIComponent(nodeUrl)}`);
       const data = await res.json();
-      if (data.results) {
-        setSuggestedUsers(data.results.slice(0, 5));
+      if (data.results && data.results.length > 0) {
+        const balajiUser =
+          data.results.find(
+            (u: FarcasterUser) => u.fid === 37 || u.username?.toLowerCase() === 'balajis'
+          ) || DEFAULT_SUGGESTED_USERS[0];
+        const mohammadUser =
+          data.results.find(
+            (u: FarcasterUser) => u.fid === 432209 || u.username?.toLowerCase() === 'mohammad98'
+          ) || DEFAULT_SUGGESTED_USERS[1];
+        setSuggestedUsers([balajiUser, mohammadUser]);
+      } else {
+        setSuggestedUsers(DEFAULT_SUGGESTED_USERS);
       }
     } catch {
-      // ignore
+      setSuggestedUsers(DEFAULT_SUGGESTED_USERS);
     }
   };
 
@@ -234,6 +316,19 @@ export function FarcasterClient() {
         setCurrentProfile(data.user);
         setProfileFid(data.user.fid);
         setIsFollowingCurrentProfile(!!data.isFollowing);
+
+        // Keep session updated if viewing logged-in profile
+        if (session && session.fid === data.user.fid) {
+          const updated: UserSession = {
+            ...session,
+            username: data.user.username || session.username,
+            displayName: data.user.displayName || session.displayName,
+            pfpUrl: data.user.pfpUrl || session.pfpUrl,
+            bio: data.user.bio || session.bio,
+          };
+          setSession(updated);
+          localStorage.setItem('farcaster_session', JSON.stringify(updated));
+        }
 
         // Fetch their casts
         const castsRes = await fetch(`/api/users/${data.user.fid}/casts?nodeUrl=${encodeURIComponent(nodeUrl)}`);
@@ -458,9 +553,7 @@ export function FarcasterClient() {
   // Copy helper
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
-    setCopiedCmd(label);
     showToast(`Copied ${label}`);
-    setTimeout(() => setCopiedCmd(null), 2000);
   };
 
   // Format timestamp (e.g. 15m, 2h, 3d)
@@ -482,7 +575,7 @@ export function FarcasterClient() {
         </div>
       )}
 
-      {/* Top Bar: Ground Truth Quickstart Banner (Directive 1 Compliance) */}
+      {/* Top Bar Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm backdrop-blur-md bg-white/95">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -523,17 +616,6 @@ export function FarcasterClient() {
               <RefreshCw className={`h-3 w-3 ml-0.5 ${isPinging ? 'animate-spin' : ''}`} />
             </button>
 
-            {/* Quickstart 3 Commands Dropdown (Ground Truth Directive 1) */}
-            <button
-              onClick={() => setIsQuickstartOpen(!isQuickstartOpen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 text-xs font-semibold transition-all shadow-sm"
-            >
-              <Terminal className="h-3.5 w-3.5 text-purple-600" />
-              <span className="hidden sm:inline">3-Step Quickstart</span>
-              <span className="sm:hidden">Quickstart</span>
-              {isQuickstartOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-
             {/* Auth Button */}
             {session ? (
               <div className="flex items-center gap-2">
@@ -572,94 +654,6 @@ export function FarcasterClient() {
             )}
           </div>
         </div>
-
-        {/* Collapsible Quickstart Bar */}
-        {isQuickstartOpen && (
-          <div className="border-t border-purple-100 bg-purple-50/70 p-4 animate-in fade-in slide-in-from-top-1">
-            <div className="max-w-7xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Terminal className="h-4 w-4 text-purple-700" />
-                  <span className="text-xs font-bold text-purple-950 uppercase tracking-wider">
-                    Official 3-Command Quickstart Pipeline (Zero API Keys)
-                  </span>
-                </div>
-                <span className="text-[11px] text-purple-700 font-medium">MIT License • Sovereign Suite</span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* Command 0 */}
-                <div className="bg-white rounded-xl border border-purple-200/80 p-3 shadow-xs space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>(0) Provision Compute</span>
-                    <button
-                      onClick={() =>
-                        handleCopy(
-                          'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash',
-                          'Command 0'
-                        )
-                      }
-                      className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-[11px]"
-                    >
-                      {copiedCmd === 'Command 0' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      <span>Copy</span>
-                    </button>
-                  </div>
-                  <pre className="text-[11px] font-mono bg-slate-900 text-purple-300 p-2 rounded-lg overflow-x-auto select-all">
-                    curl -sSL .../0-provision-compute.sh | bash
-                  </pre>
-                  <p className="text-[10px] text-slate-500">Tunes kernel, opens ports 22, 3381, 3382, 3000.</p>
-                </div>
-
-                {/* Command 1 */}
-                <div className="bg-white rounded-xl border border-purple-200/80 p-3 shadow-xs space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>(1) Setup Read Node</span>
-                    <button
-                      onClick={() =>
-                        handleCopy(
-                          'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash',
-                          'Command 1'
-                        )
-                      }
-                      className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-[11px]"
-                    >
-                      {copiedCmd === 'Command 1' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      <span>Copy</span>
-                    </button>
-                  </div>
-                  <pre className="text-[11px] font-mono bg-slate-900 text-purple-300 p-2 rounded-lg overflow-x-auto select-all">
-                    curl -sSL .../1-setup-read-node.sh | bash
-                  </pre>
-                  <p className="text-[10px] text-slate-500">Syncs snapshot and validates messages at :3381.</p>
-                </div>
-
-                {/* Command 2 */}
-                <div className="bg-white rounded-xl border border-purple-200/80 p-3 shadow-xs space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                    <span>(2) Launch Client</span>
-                    <button
-                      onClick={() =>
-                        handleCopy(
-                          'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash',
-                          'Command 2'
-                        )
-                      }
-                      className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-[11px]"
-                    >
-                      {copiedCmd === 'Command 2' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      <span>Copy</span>
-                    </button>
-                  </div>
-                  <pre className="text-[11px] font-mono bg-slate-900 text-purple-300 p-2 rounded-lg overflow-x-auto select-all">
-                    curl -sSL .../2-create-client.sh | bash
-                  </pre>
-                  <p className="text-[10px] text-slate-500">Boots this web client with gasless app key support.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Main Container: 3 Columns */}
@@ -937,8 +931,12 @@ export function FarcasterClient() {
 
                           {/* Client Attribution Badge */}
                           {cast.clientSource && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
-                              <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getClientBadgeColor(
+                                cast.clientSource
+                              )}`}
+                            >
+                              <span className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(cast.clientSource)}`} />
                               {cast.clientSource}
                             </span>
                           )}
@@ -1095,7 +1093,12 @@ export function FarcasterClient() {
                         </div>
 
                         {currentThreadCast.clientSource && (
-                          <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${getClientBadgeColor(
+                              currentThreadCast.clientSource
+                            )}`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(currentThreadCast.clientSource)}`} />
                             {currentThreadCast.clientSource}
                           </span>
                         )}
@@ -1330,7 +1333,16 @@ export function FarcasterClient() {
                         >
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span>{formatTimeAgo(cast.timestamp)} ago</span>
-                            <span className="text-[10px] font-mono">{cast.clientSource}</span>
+                            {cast.clientSource && (
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getClientBadgeColor(
+                                  cast.clientSource
+                                )}`}
+                              >
+                                <span className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(cast.clientSource)}`} />
+                                {cast.clientSource}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-slate-800 whitespace-pre-wrap">{cast.text}</p>
                         </div>
@@ -1516,7 +1528,7 @@ export function FarcasterClient() {
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
               <h3 className="font-bold text-xs text-slate-900 uppercase tracking-wider">Who to Follow</h3>
               <div className="space-y-2.5">
-                {suggestedUsers.map((u) => (
+                {suggestedUsers.slice(0, 2).map((u) => (
                   <div key={u.fid} className="flex items-center justify-between">
                     <div
                       onClick={() => handleOpenProfile(u.fid)}

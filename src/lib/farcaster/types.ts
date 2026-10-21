@@ -70,6 +70,7 @@ export interface UserSession {
   signerPrivateKey: string;
   expiresAt: number;
   isSandbox?: boolean;
+  bio?: string;
 }
 
 import { MessageType } from '@farcaster/core';

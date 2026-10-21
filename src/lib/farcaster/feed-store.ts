@@ -10,7 +10,24 @@ import { defaultNodeClient } from './node-client';
 class FeedStore {
   private casts: Map<string, FarcasterCast> = new Map();
   private users: Map<number, FarcasterUser> = new Map();
-  private followedFids: Set<number> = new Set([2, 3, 37]);
+  private followedFids: Set<number> = new Set([37, 432209]);
+
+  constructor() {
+    this.registerUser({
+      fid: 37,
+      username: 'balajis',
+      displayName: 'balajis',
+      pfpUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/16e9ecaa-0837-4243-4316-ceeb9db19600/original',
+      bio: 'Founder of Network School, author of The Network State, former CTO of Coinbase.',
+    });
+    this.registerUser({
+      fid: 432209,
+      username: 'mohammad98',
+      displayName: 'Mohammad 🎩',
+      pfpUrl: 'https://i.imgur.com/soNnpxz.jpg',
+      bio: 'Full-stack Web3 & Sovereign Protocol Engineer',
+    });
+  }
 
   /**
    * Register or update a user profile in memory cache
@@ -31,22 +48,22 @@ class FeedStore {
     if (!isNaN(fidNum) && fidNum > 0) {
       if (this.users.has(fidNum)) {
         const cached = this.users.get(fidNum)!;
-        if (cached.username || cached.displayName) {
+        const isDummy = (!cached.username || cached.username.startsWith('user_')) && (!cached.displayName || cached.displayName.startsWith('FID '));
+        if (!isDummy) {
           return cached;
         }
       }
 
-      // Query local Snapchain node
-      if (nodeUrl) {
-        try {
-          const profile = await defaultNodeClient.getUserProfile(fidNum, nodeUrl);
-          if (profile.username || profile.displayName || profile.pfpUrl) {
-            this.registerUser(profile);
-            return profile;
-          }
-        } catch {
-          // Node unreachable or syncing
+      // Query local Snapchain node with public fallback
+      const targetUrl = nodeUrl || 'http://127.0.0.1:3381';
+      try {
+        const profile = await defaultNodeClient.getUserProfile(fidNum, targetUrl);
+        if (profile.username && !profile.username.startsWith('user_')) {
+          this.registerUser(profile);
+          return profile;
         }
+      } catch {
+        // Node unreachable or syncing
       }
 
       // Dynamic fallback based on real FID without mock data
@@ -73,25 +90,24 @@ class FeedStore {
     }
 
     // Resolve username on the local Snapchain node
-    if (nodeUrl) {
-      try {
-        const proof = await defaultNodeClient.lookupUsername(cleanUsername, nodeUrl);
-        if (proof && proof.fid) {
-          const profile = await defaultNodeClient.getUserProfile(proof.fid, nodeUrl);
-          const resolved: FarcasterUser = {
-            fid: proof.fid,
-            username: profile.username || proof.name,
-            displayName: profile.displayName || proof.name,
-            pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${proof.fid}`,
-            bio: profile.bio || `Sovereign protocol participant on Snapchain`,
-            custodyAddress: proof.owner,
-          };
-          this.registerUser(resolved);
-          return resolved;
-        }
-      } catch {
-        // Node proof lookup failed
+    const targetUrl = nodeUrl || 'http://127.0.0.1:3381';
+    try {
+      const proof = await defaultNodeClient.lookupUsername(cleanUsername, targetUrl);
+      if (proof && proof.fid) {
+        const profile = await defaultNodeClient.getUserProfile(proof.fid, targetUrl);
+        const resolved: FarcasterUser = {
+          fid: proof.fid,
+          username: profile.username || proof.name,
+          displayName: profile.displayName || proof.name,
+          pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${proof.fid}`,
+          bio: profile.bio || `Sovereign protocol participant on Snapchain`,
+          custodyAddress: proof.owner,
+        };
+        this.registerUser(resolved);
+        return resolved;
       }
+    } catch {
+      // Node proof lookup failed
     }
 
     return null;
@@ -104,9 +120,14 @@ class FeedStore {
     const q = query.trim().toLowerCase().replace(/^@/, '');
     const resultMap = new Map<number, FarcasterUser>();
 
-    // 1. If empty, return currently known cached users from the node
+    // 1. If empty, return featured users: balajis (first) and mohammad98 (second)
     if (!q) {
-      return Array.from(this.users.values()).slice(0, 10);
+      const featured: FarcasterUser[] = [];
+      const u1 = this.users.get(37);
+      if (u1) featured.push(u1);
+      const u2 = this.users.get(432209);
+      if (u2) featured.push(u2);
+      return featured;
     }
 
     // 2. Direct username lookup on local Snapchain node

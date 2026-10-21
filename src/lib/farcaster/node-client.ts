@@ -202,22 +202,48 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/userNameProofByName?name=${encodeURIComponent(cleanName)}`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(5000),
         }
       );
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (data && typeof data.fid === 'number') {
-        return {
-          fid: data.fid,
-          owner: data.owner || '',
-          name: data.name || cleanName,
-        };
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data.fid === 'number') {
+          return {
+            fid: data.fid,
+            owner: data.owner || '',
+            name: data.name || cleanName,
+          };
+        }
       }
-      return null;
     } catch {
-      return null;
+      // Local node lookup failed
     }
+
+    // Public directory fallback
+    try {
+      const wcRes = await fetch(
+        `https://client.warpcast.com/v2/user-by-username?username=${encodeURIComponent(cleanName)}`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(4000),
+        }
+      );
+      if (wcRes.ok) {
+        const wcData = await wcRes.json();
+        const u = wcData?.result?.user;
+        if (u && typeof u.fid === 'number') {
+          return {
+            fid: u.fid,
+            owner: u.connectedAccounts?.[0] || '0x',
+            name: u.username || cleanName,
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
   }
 
   /**
@@ -228,17 +254,47 @@ export class SnapchainNodeClient {
     try {
       const response = await fetch(`${cleanUrl}/v1/userNameProofsByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(5000),
       });
-      if (!response.ok) return null;
-      const data = await response.json();
-      if (Array.isArray(data.proofs) && data.proofs.length > 0) {
-        return data.proofs[0].name || null;
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.proofs) && data.proofs.length > 0) {
+          const rawName = data.proofs[0].name;
+          if (typeof rawName === 'string') {
+            // In protobuf JSON, bytes fields can be base64-encoded
+            try {
+              const decoded = Buffer.from(rawName, 'base64').toString('utf8');
+              if (decoded && /^[a-zA-Z0-9_-]+$/.test(decoded)) {
+                return decoded;
+              }
+            } catch {
+              // ignore
+            }
+            return rawName;
+          }
+        }
       }
-      return null;
     } catch {
-      return null;
+      // Local node lookup failed
     }
+
+    // Fallback: Official decentralized FName registry
+    try {
+      const fnameRes = await fetch(`https://fnames.farcaster.xyz/transfers/current?fid=${fid}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (fnameRes.ok) {
+        const data = await fnameRes.json();
+        if (data?.transfer?.username) {
+          return data.transfer.username;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
   }
 
   /**
@@ -248,10 +304,11 @@ export class SnapchainNodeClient {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
     const profile: FarcasterUser = { fid };
 
+    // 1. Query local Snapchain node
     try {
       const response = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (response.ok) {
@@ -259,26 +316,73 @@ export class SnapchainNodeClient {
         const messages = data.messages || [];
 
         for (const msg of messages) {
-          const body = msg.data?.userDataBody;
+          const body = msg.data?.userDataBody || msg.data?.user_data_body || msg.userDataBody;
           if (!body) continue;
 
-          // USER_DATA_TYPE_PFP = 1, DISPLAY = 2, BIO = 3, USERNAME = 6
-          if (body.type === 1 || body.type === 'USER_DATA_TYPE_PFP') profile.pfpUrl = body.value;
-          if (body.type === 2 || body.type === 'USER_DATA_TYPE_DISPLAY') profile.displayName = body.value;
-          if (body.type === 3 || body.type === 'USER_DATA_TYPE_BIO') profile.bio = body.value;
-          if (body.type === 6 || body.type === 'USER_DATA_TYPE_USERNAME') profile.username = body.value;
+          const typeStr = String(body.type || '').toUpperCase();
+          if (typeStr === '1' || typeStr === 'USER_DATA_TYPE_PFP' || typeStr === 'PFP') {
+            profile.pfpUrl = body.value;
+          } else if (typeStr === '2' || typeStr === 'USER_DATA_TYPE_DISPLAY' || typeStr === 'DISPLAY') {
+            profile.displayName = body.value;
+          } else if (typeStr === '3' || typeStr === 'USER_DATA_TYPE_BIO' || typeStr === 'BIO') {
+            profile.bio = body.value;
+          } else if (typeStr === '6' || typeStr === 'USER_DATA_TYPE_USERNAME' || typeStr === 'USERNAME') {
+            profile.username = body.value;
+          }
         }
       }
     } catch (err) {
-      console.warn(`Could not load user profile for FID ${fid}:`, err);
+      console.warn(`Local node user profile lookup for FID ${fid} timed out or failed:`, err);
     }
 
-    // If username is not set in userData, check userNameProofsByFid on the node
+    // 2. Check username proofs
     if (!profile.username) {
       const proofName = await this.getUserNameProofs(fid, cleanUrl);
       if (proofName) {
         profile.username = proofName;
         if (!profile.displayName) profile.displayName = proofName;
+      }
+    }
+
+    // 3. Fallback to public network directory if profile metadata is incomplete
+    if (!profile.username || !profile.displayName || !profile.pfpUrl) {
+      try {
+        const wcRes = await fetch(`https://client.warpcast.com/v2/user-by-fid?fid=${fid}`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (wcRes.ok) {
+          const wcData = await wcRes.json();
+          const u = wcData?.result?.user;
+          if (u) {
+            if (!profile.username && u.username) profile.username = u.username;
+            if (!profile.displayName && u.displayName) profile.displayName = u.displayName;
+            if (!profile.pfpUrl && u.pfp?.url) profile.pfpUrl = u.pfp.url;
+            if (!profile.bio && u.profile?.bio?.text) profile.bio = u.profile.bio.text;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 4. Ensure username is populated via FName registry if still missing
+    if (!profile.username) {
+      try {
+        const fnameRes = await fetch(`https://fnames.farcaster.xyz/transfers/current?fid=${fid}`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (fnameRes.ok) {
+          const fnameData = await fnameRes.json();
+          const uname = fnameData?.transfer?.username;
+          if (uname) {
+            profile.username = uname;
+            if (!profile.displayName) profile.displayName = uname;
+          }
+        }
+      } catch {
+        // ignore
       }
     }
 
