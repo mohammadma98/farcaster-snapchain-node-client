@@ -184,21 +184,31 @@ echo -e "${YELLOW}[2/4] Tailoring container definitions to system profile...${NC
 
 # If metrics are disabled, strip statsd and grafana services from compose
 if [ "$METRICS_ACTIVE" != "true" ]; then
-    # Strip statsd and grafana service blocks
+    # Strip statsd and grafana service blocks cleanly
     python3 -c "
-import sys
 with open('docker-compose.yml', 'r') as f:
     lines = f.readlines()
 out = []
 skip = False
 for line in lines:
-    if line.startswith('  statsd:') or line.startswith('  grafana:'):
-        skip = True
-        continue
-    if skip and line.startswith('  ') and not line.startswith('    ') and not line.startswith('  #'):
+    stripped = line.strip()
+    is_top_level = bool(stripped) and not stripped.startswith('#') and not line.startswith((' ', '\t'))
+    is_service = line.startswith('  ') and not line.startswith('   ') and stripped.endswith(':') and not stripped.startswith('#')
+
+    if is_top_level:
         skip = False
+    elif is_service:
+        if line.startswith('  statsd:') or line.startswith('  grafana:'):
+            skip = True
+            continue
+        else:
+            skip = False
+    elif stripped.startswith('#') and ('statsd' in stripped.lower() or 'grafana' in stripped.lower()):
+        continue
+
     if not skip:
         out.append(line)
+
 with open('docker-compose.yml', 'w') as f:
     f.writelines(out)
 " 2>/dev/null || true
