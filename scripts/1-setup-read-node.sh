@@ -339,6 +339,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
     # Background tar worker reading from FIFO into base .rocks directory (archives embed shard-X/ path)
     tar -xf "$PIPE_FIFO" -C "${SNAPCHAIN_DIR}/.rocks" &
     TAR_PID=$!
+    TAR_COMPLETED=false
 
     # Open persistent write descriptor 3 on FIFO. Keeps pipe open continuously across all chunk writes!
     exec 3> "$PIPE_FIFO"
@@ -378,23 +379,29 @@ for SHARD_ID in "${SHARDS[@]}"; do
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
         else
             echo -e "\n${RED}[ERROR] Chunk file missing or empty: ${CURRENT_CHUNK}.${NC}"
-            exec 3>&-
+            exec 3>&- 2>/dev/null || true
             kill -9 "$TAR_PID" 2>/dev/null || true
             exit 1
         fi
 
-        # Check tar health to prevent zombie hangs
+        # Check tar health (distinguish between successful archive completion and real crashes)
         if ! kill -0 "$TAR_PID" 2>/dev/null; then
-            echo -e "\n${RED}[ERROR] tar extractor process died unexpectedly for Shard ${SHARD_ID}.${NC}"
-            exec 3>&-
-            exit 1
+            wait "$TAR_PID" 2>/dev/null
+            TAR_STATUS=$?
+            if [ "$TAR_STATUS" -eq 0 ]; then
+                TAR_COMPLETED=true
+            else
+                echo -e "\n${RED}[ERROR] tar extractor failed with exit code ${TAR_STATUS} for Shard ${SHARD_ID}.${NC}"
+                exec 3>&- 2>/dev/null || true
+                exit 1
+            fi
         fi
 
         # Wait for concurrent background download of next chunk to complete
         if [ -n "$NEXT_PID" ]; then
             wait "$NEXT_PID" || {
                 echo -e "\n${RED}[ERROR] Download failed for chunk index ${NEXT_INDEX}.${NC}"
-                exec 3>&-
+                exec 3>&- 2>/dev/null || true
                 kill -9 "$TAR_PID" 2>/dev/null || true
                 exit 1
             }
@@ -417,11 +424,23 @@ for SHARD_ID in "${SHARDS[@]}"; do
             "$SHARD_ID" "$NUM_SHARDS" "$PERCENT" "$DONE_COUNT" "$TOTAL_CHUNKS" \
             "$(format_bytes "$BYTES_PROCESSED")" "$(format_speed "$CURR_SPEED")" \
             $(( ELAPSED / 60 )) $(( ELAPSED % 60 ))
+
+        # If tar cleanly completed end-of-archive marker, we can conclude this shard
+        if [ "$TAR_COMPLETED" == "true" ]; then
+            break
+        fi
     done
 
-    # Close FIFO write descriptor so tar sees EOF cleanly
-    exec 3>&-
-    wait "$TAR_PID" || true
+    # Close FIFO write descriptor so tar sees EOF cleanly if still running
+    exec 3>&- 2>/dev/null || true
+    if [ "$TAR_COMPLETED" != "true" ]; then
+        wait "$TAR_PID" 2>/dev/null
+        TAR_STATUS=$?
+        if [ "$TAR_STATUS" -ne 0 ]; then
+            echo -e "\n${RED}[ERROR] tar extractor completed with non-zero exit code: ${TAR_STATUS}.${NC}"
+            exit 1
+        fi
+    fi
     rm -f "$PIPE_FIFO"
     rm -rf "$BUFFER_DIR"
 
