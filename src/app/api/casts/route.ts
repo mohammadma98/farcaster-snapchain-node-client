@@ -31,10 +31,18 @@ export async function POST(request: Request) {
       targetNodeUrl
     );
 
-    // Compute or format cast hash
-    const hash =
-      nodeResult.hash ||
-      '0x' + Array.from({ length: 20 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+    if (!nodeResult.success) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: nodeResult.error || 'Snapchain node rejected the cast submission.',
+          nodeResult,
+        },
+        { status: 400 }
+      );
+    }
+
+    const hash = nodeResult.hash || '0x...';
 
     // 2. Fetch author profile
     const authorUser = await feedStore.getUser(fid, targetNodeUrl);
@@ -77,8 +85,7 @@ export async function POST(request: Request) {
       success: true,
       hash,
       cast: newCast,
-      nodeGossipStatus: nodeResult.success ? 'ACCEPTED_MEMPOOL' : 'OFFLINE_LOCAL_QUEUE',
-      error: nodeResult.error,
+      nodeGossipStatus: 'ACCEPTED_MEMPOOL',
     });
   } catch (err: any) {
     return NextResponse.json(

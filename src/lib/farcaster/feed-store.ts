@@ -204,6 +204,29 @@ class FeedStore {
         return u;
       }
     }
+
+    // Try resolving username on Snapchain node
+    if (nodeUrl) {
+      try {
+        const proof = await defaultNodeClient.lookupUsername(cleanUsername, nodeUrl);
+        if (proof && proof.fid) {
+          const profile = await defaultNodeClient.getUserProfile(proof.fid, nodeUrl);
+          const resolved: FarcasterUser = {
+            fid: proof.fid,
+            username: profile.username || proof.name,
+            displayName: profile.displayName || proof.name,
+            pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${proof.fid}`,
+            bio: profile.bio || 'Farcaster user',
+            custodyAddress: proof.owner,
+          };
+          this.registerUser(resolved);
+          return resolved;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     return null;
   }
 
@@ -338,7 +361,9 @@ class FeedStore {
 
     // If node is available, attempt to fetch recent casts for known active FIDs
     if (options?.nodeUrl) {
-      const sampleFids = options.fid ? [options.fid] : [320011, 2, 3];
+      const sampleFids = options.fid
+        ? [options.fid]
+        : Array.from(new Set([320011, 2, 3, 432209, ...this.getFollowedFids()]));
       for (const targetFid of sampleFids) {
         try {
           const remoteCasts = await defaultNodeClient.getCastsByFid(targetFid, 10, options.nodeUrl);

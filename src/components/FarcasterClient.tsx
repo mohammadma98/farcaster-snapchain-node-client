@@ -179,7 +179,7 @@ export function FarcasterClient() {
   // 4. Fetch Suggested Users
   const fetchSuggestedUsers = async () => {
     try {
-      const res = await fetch('/api/users/search?q=');
+      const res = await fetch(`/api/users/search?q=&nodeUrl=${encodeURIComponent(nodeUrl)}`);
       const data = await res.json();
       if (data.results) {
         setSuggestedUsers(data.results.slice(0, 5));
@@ -244,7 +244,7 @@ export function FarcasterClient() {
     }
     setIsSearching(true);
     try {
-      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query.trim())}`);
+      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query.trim())}&nodeUrl=${encodeURIComponent(nodeUrl)}`);
       const data = await res.json();
       if (data.results) {
         setSearchResults(data.results);

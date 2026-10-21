@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deriveCustodyFromMnemonic, validateMnemonic } from '@/lib/farcaster/crypto';
 import { GaslessSignerManager } from '@/lib/farcaster/gasless-signer';
+import { defaultNodeClient } from '@/lib/farcaster/node-client';
 import { feedStore } from '@/lib/farcaster/feed-store';
 import { UserSession } from '@/lib/farcaster/types';
 
@@ -9,11 +10,11 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { mnemonic, fid, nodeUrl } = body;
+    const { mnemonic, usernameOrFid, fid, nodeUrl } = body;
 
     if (!mnemonic?.trim()) {
       return NextResponse.json(
-        { status: 'error', error: 'Mnemonic seed phrase is required' },
+        { status: 'error', error: 'Mnemonic seed phrase (12 or 24 words) is required' },
         { status: 400 }
       );
     }
@@ -27,19 +28,51 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Derive Custody Account
+    // 1. Derive Custody Account from seed phrase
     const custodyAccount = deriveCustodyFromMnemonic(cleanMnemonic);
     const custodyAddress = custodyAccount.address;
 
-    // 2. Resolve FID (if user didn't enter one, derive a stable deterministic or test FID)
-    let userFid = fid ? parseInt(fid, 10) : 0;
-    if (!userFid || isNaN(userFid)) {
-      // Deterministically derive a virtual FID from the address checksum
-      const hexSub = custodyAddress.slice(2, 8);
-      userFid = 100000 + (parseInt(hexSub, 16) % 899999);
-    }
-
     const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+
+    // 2. Resolve FID accurately from username or numeric FID
+    let userFid = 0;
+    let resolvedUsername = '';
+
+    const identifierInput = (usernameOrFid || fid || '').trim();
+
+    if (identifierInput) {
+      const cleanInput = identifierInput.replace(/^@/, '');
+      const parsedNum = parseInt(cleanInput, 10);
+
+      if (!isNaN(parsedNum) && String(parsedNum) === cleanInput) {
+        // Direct numeric FID provided
+        userFid = parsedNum;
+      } else {
+        // Username provided - resolve via FName Registry on Snapchain node
+        const proof = await defaultNodeClient.lookupUsername(cleanInput, targetNodeUrl);
+        if (proof && proof.fid) {
+          userFid = proof.fid;
+          resolvedUsername = proof.name;
+        } else {
+          return NextResponse.json(
+            {
+              status: 'error',
+              error: `Could not find Farcaster account for username '@${cleanInput}' on the Snapchain node. Please verify spelling or enter your numeric FID.`,
+            },
+            { status: 404 }
+          );
+        }
+      }
+    } else {
+      // User didn't enter username or FID
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: 'Please enter your Farcaster username (e.g. @mohammad98) or FID to bind your custody keys to your onchain account.',
+        },
+        { status: 400 }
+      );
+    }
 
     // 3. Issue Gasless Ed25519 Signer via EIP-712 from Custody Address
     const { signer, encodedBytes } = await GaslessSignerManager.issueGaslessSigner({
@@ -51,27 +84,24 @@ export async function POST(request: Request) {
     // 4. Submit signed KEY_ADD to Snapchain node mempool
     const nodeSubmission = await GaslessSignerManager.submitKeyAddToNode(targetNodeUrl, encodedBytes);
 
-    // 5. Look up existing profile or construct profile
-    let profile = await feedStore.getUser(userFid, targetNodeUrl);
-    if (!profile) {
-      profile = {
-        fid: userFid,
-        username: `user_${userFid}`,
-        displayName: `FID ${userFid}`,
-        custodyAddress,
-        pfpUrl: `https://avatar.vercel.sh/${custodyAddress}`,
-        bio: 'Sovereign Farcaster Client User',
-      };
-      feedStore.registerUser(profile);
-    } else {
-      profile.custodyAddress = custodyAddress;
-    }
+    // 5. Fetch authentic user profile from the node
+    const nodeProfile = await defaultNodeClient.getUserProfile(userFid, targetNodeUrl);
+    const profile = {
+      fid: userFid,
+      username: nodeProfile.username || resolvedUsername || `user_${userFid}`,
+      displayName: nodeProfile.displayName || resolvedUsername || `FID ${userFid}`,
+      pfpUrl: nodeProfile.pfpUrl || `https://avatar.vercel.sh/${custodyAddress}`,
+      bio: nodeProfile.bio || 'Farcaster user on Snapchain',
+      custodyAddress,
+    };
+
+    feedStore.registerUser(profile);
 
     const session: UserSession = {
       fid: userFid,
-      username: profile.username || `user_${userFid}`,
-      displayName: profile.displayName || `FID ${userFid}`,
-      pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${custodyAddress}`,
+      username: profile.username,
+      displayName: profile.displayName,
+      pfpUrl: profile.pfpUrl,
       custodyAddress,
       activeSignerKey: signer.publicKeyHex,
       signerPrivateKey: signer.privateKeyHex,
@@ -85,6 +115,7 @@ export async function POST(request: Request) {
       user: session,
       signerHash: nodeSubmission.hash,
       nodeGossipStatus: nodeSubmission.success ? 'SUBMITTED_MEMPOOL' : 'OFFLINE_READY',
+      nodeSubmissionError: nodeSubmission.error,
     });
   } catch (err: any) {
     return NextResponse.json(

@@ -24,7 +24,7 @@ interface LoginPageProps {
 
 export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps) {
   const [mnemonic, setMnemonic] = useState('');
-  const [fid, setFid] = useState('');
+  const [usernameOrFid, setUsernameOrFid] = useState('');
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingDev, setIsGeneratingDev] = useState(false);
@@ -58,6 +58,10 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
       setError(`Detected ${wordCount} words. Seed phrase must have exactly 12 or 24 words.`);
       return;
     }
+    if (!usernameOrFid.trim()) {
+      setError('Please enter your Farcaster username (e.g. @mohammad98) or FID.');
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -68,7 +72,7 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mnemonic: mnemonic.trim(),
-          fid: fid.trim() || undefined,
+          usernameOrFid: usernameOrFid.trim(),
           nodeUrl,
         }),
       });
@@ -100,8 +104,8 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
       }
 
       setMnemonic(data.mnemonic);
-      if (data.user?.fid) {
-        setFid(String(data.user.fid));
+      if (data.user?.username) {
+        setUsernameOrFid(data.user.username);
       }
       onLoginSuccess(data.user);
     } catch (err: any) {
@@ -245,19 +249,22 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
             </div>
           </div>
 
-          {/* FID input (optional) */}
+          {/* Username or FID input */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-gray-700">
-                Farcaster ID (FID) <span className="font-normal text-gray-400">(Optional)</span>
+                Farcaster Username or FID <span className="text-purple-600 font-bold">*</span>
               </label>
-              <span className="text-[10px] text-gray-400">Auto-assigned if left blank</span>
+              <span className="text-[10px] text-gray-400">e.g. @mohammad98 or 432209</span>
             </div>
             <input
-              type="number"
-              value={fid}
-              onChange={(e) => setFid(e.target.value)}
-              placeholder="e.g. 320011"
+              type="text"
+              value={usernameOrFid}
+              onChange={(e) => {
+                setUsernameOrFid(e.target.value);
+                setError(null);
+              }}
+              placeholder="e.g. mohammad98 or 432209"
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-xs text-gray-900 focus:bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
             />
           </div>

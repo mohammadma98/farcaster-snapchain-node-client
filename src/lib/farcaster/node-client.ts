@@ -87,6 +87,40 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Lookup FName proof and FID for a username on the Snapchain node
+   */
+  async lookupUsername(
+    name: string,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<{ fid: number; owner: string; name: string } | null> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanName = name.trim().toLowerCase().replace(/^@/, '');
+    if (!cleanName) return null;
+
+    try {
+      const res = await fetch(
+        `${cleanUrl}/v1/userNameProofByName?name=${encodeURIComponent(cleanName)}`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && typeof data.fid === 'number') {
+        return {
+          fid: data.fid,
+          owner: data.owner || '',
+          name: data.name || cleanName,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Fetch user metadata (Bio, Display Name, PFP, Username) from the local node
    */
   async getUserProfile(fid: number, nodeUrl = this.defaultNodeUrl): Promise<FarcasterUser> {
@@ -132,8 +166,11 @@ export class SnapchainNodeClient {
 
     try {
       const response = await fetch(
-        `${cleanUrl}/v1/castsByFid?fid=${fid}&pageSize=${pageSize}&reverse=1`,
-        { headers: { Accept: 'application/json' } }
+        `${cleanUrl}/v1/castsByFid?fid=${fid}&pageSize=${pageSize}&reverse=true`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(4000),
+        }
       );
 
       if (!response.ok) return [];
@@ -245,7 +282,7 @@ export class SnapchainNodeClient {
 
     try {
       const response = await fetch(
-        `${cleanUrl}/v1/castsByParent?fid=${parentFid}&hash=${cleanHash}&pageSize=${pageSize}&reverse=1`,
+        `${cleanUrl}/v1/castsByParent?fid=${parentFid}&hash=${cleanHash}&pageSize=${pageSize}&reverse=true`,
         {
           headers: { Accept: 'application/json' },
           signal: AbortSignal.timeout(3000),
