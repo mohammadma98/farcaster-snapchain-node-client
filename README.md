@@ -134,6 +134,58 @@ npm run cli react 2 0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8 like
 
 ---
 
+## 🔌 Sovereign REST API Documentation
+
+The client suite includes a full set of RESTful backend API routes (`/api/...`) that communicate directly with the local Snapchain node (`http://127.0.0.1:3381`). You can integrate these endpoints into your own applications, scripts, or agents:
+
+### 1. Feed & Casts
+* **`GET /api/feed?source=all&limit=40`**: Retrieve recent protocol casts. Supports client filtering (`source=Warpcast`, `source=Supercast`, `source=Direct Snapchain`).
+* **`GET /api/casts/:hash`**: Retrieve full cast details, parent cast, and all replies/comments.
+* **`POST /api/casts`**: Publish a new cast, quote cast, or thread reply directly to the read node mempool via signed binary Protobuf.
+  ```json
+  {
+    "fid": 320011,
+    "signerPrivateKey": "0x...",
+    "text": "Decentralized social directly through local Snapchain node!",
+    "embeds": [{ "url": "https://farcaster.xyz" }]
+  }
+  ```
+
+### 2. Reactions & Social Graph (Follows)
+* **`POST /api/reactions`**: Like, unlike, recast, or unrecast a target cast:
+  ```json
+  {
+    "fid": 320011,
+    "signerPrivateKey": "0x...",
+    "targetFid": 2,
+    "targetHash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8",
+    "type": "like",
+    "isRemove": false
+  }
+  ```
+* **`POST /api/links`**: Follow or unfollow a user via protocol `LinkAdd` / `LinkRemove`:
+  ```json
+  {
+    "fid": 320011,
+    "signerPrivateKey": "0x...",
+    "targetFid": 3,
+    "type": "follow",
+    "isRemove": false
+  }
+  ```
+
+### 3. Users & Search
+* **`GET /api/users/:id`**: Fetch user profile (by numeric FID or `@username`).
+* **`GET /api/users/:id/casts`**: Fetch all casts published by a user.
+* **`GET /api/users/search?q=query`**: Search users by username, display name, or FID.
+
+### 4. Cryptographic Authentication & Node Health
+* **`POST /api/auth/login`**: Authenticate with 12/24-word seed phrase, derive custody address, and issue gasless Ed25519 signer via off-chain EIP-712 signature.
+* **`POST /api/auth/sandbox`**: Generate a fresh 12-word dev mnemonic and sandbox test account in 1 click.
+* **`GET /api/node/status`**: Live health check, ping latency, peer count, and sync state from `http://127.0.0.1:3381/v1/info`.
+
+---
+
 ## 🇨🇳 中文快速入门与架构说明 (Chinese Quickstart & Documentation)
 
 本项目提供完整的端到端独立 Farcaster Snapchain 只读节点与自主 Web/CLI 客户端套件，支持**零第三方 API 密钥**、**无 Gas 签名密钥 (EIP-712)** 与**客户端自由过滤**。

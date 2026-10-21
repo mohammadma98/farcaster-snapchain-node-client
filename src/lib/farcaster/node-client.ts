@@ -180,6 +180,117 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Fetch a single cast by FID and Hash directly from the local node
+   */
+  async getCastById(
+    fid: number,
+    hashHex: string,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<FarcasterCast | null> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanHash = hashHex.startsWith('0x') ? hashHex : `0x${hashHex}`;
+
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/castById?fid=${fid}&hash=${cleanHash}`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+
+      if (!response.ok) return null;
+
+      const msg = await response.json();
+      const castBody = msg.data?.castAddBody;
+      if (!castBody) return null;
+
+      const farcasterTime = msg.data?.timestamp || 0;
+      const unixTimeResult = fromFarcasterTime(farcasterTime);
+      const timestamp = unixTimeResult.isOk() ? unixTimeResult.value : Date.now();
+
+      const cast: FarcasterCast = {
+        hash: cleanHash,
+        fid: msg.data?.fid || fid,
+        text: castBody.text || '',
+        timestamp,
+        embeds: (castBody.embeds || []).map((e: any) => ({
+          url: e.url,
+          castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
+        })),
+        parentUrl: castBody.parentUrl,
+        parentCastId: castBody.parentCastId,
+        mentions: castBody.mentions,
+      };
+
+      const attr = identifyCastClient(cast);
+      cast.clientSource = attr.clientName;
+      return cast;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch replies to a cast by parent FID and parent Hash
+   */
+  async getCastsByParent(
+    parentFid: number,
+    parentHashHex: string,
+    pageSize = 30,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<FarcasterCast[]> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanHash = parentHashHex.startsWith('0x') ? parentHashHex : `0x${parentHashHex}`;
+
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/castsByParent?fid=${parentFid}&hash=${cleanHash}&pageSize=${pageSize}&reverse=1`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      const messages = data.messages || [];
+      const replies: FarcasterCast[] = [];
+
+      for (const msg of messages) {
+        const castBody = msg.data?.castAddBody;
+        if (!castBody) continue;
+
+        const hash = typeof msg.hash === 'string' ? msg.hash : '0x';
+        const farcasterTime = msg.data?.timestamp || 0;
+        const unixTimeResult = fromFarcasterTime(farcasterTime);
+        const timestamp = unixTimeResult.isOk() ? unixTimeResult.value : Date.now();
+
+        const replyCast: FarcasterCast = {
+          hash,
+          fid: msg.data?.fid || 0,
+          text: castBody.text || '',
+          timestamp,
+          embeds: (castBody.embeds || []).map((e: any) => ({
+            url: e.url,
+            castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
+          })),
+          parentCastId: { fid: parentFid, hash: cleanHash },
+        };
+
+        const attr = identifyCastClient(replyCast);
+        replyCast.clientSource = attr.clientName;
+        replies.push(replyCast);
+      }
+
+      return replies;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Publish a cast directly to the local node's mempool via protobuf
    * Supports normal casts, replies (parentCastId), and quote casts (embeds with castId)
    */
@@ -350,6 +461,7 @@ export class SnapchainNodeClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: encodedBytes as any,
+        signal: AbortSignal.timeout(4000),
       });
 
       if (!response.ok) {

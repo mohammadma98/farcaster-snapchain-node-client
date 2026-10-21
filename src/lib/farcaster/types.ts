@@ -43,7 +43,7 @@ export interface FarcasterCast {
     displayName?: string;
     pfpUrl?: string;
   };
-  clientSource?: string; // Identified client: Warpcast, Supercast, Herocast, Native, etc.
+  clientSource?: string; // Identified client: Warpcast, Supercast, Phaver, Direct Snapchain, etc.
   embeds?: Array<{ url?: string; castId?: { fid: number; hash: string } }>;
   mentions?: number[];
   parentCastId?: {
@@ -57,6 +57,19 @@ export interface FarcasterCast {
     likedByMe?: boolean;
     recastByMe?: boolean;
   };
+  repliesCount?: number;
+}
+
+export interface UserSession {
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
+  custodyAddress: string;
+  activeSignerKey: string;
+  signerPrivateKey: string;
+  expiresAt: number;
+  isSandbox?: boolean;
 }
 
 import { MessageType } from '@farcaster/core';

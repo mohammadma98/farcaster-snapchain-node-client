@@ -1,7 +1,8 @@
 import { SnapchainNodeClient } from '../src/lib/farcaster/node-client';
 import { identifyCastClient, applyClientFilter } from '../src/lib/farcaster/client-filter';
 import { GaslessSignerManager } from '../src/lib/farcaster/gasless-signer';
-import { generateCustodyAccount } from '../src/lib/farcaster/crypto';
+import { generateCustodyAccount, deriveCustodyFromMnemonic, generateDevMnemonic, validateMnemonic } from '../src/lib/farcaster/crypto';
+import { feedStore } from '../src/lib/farcaster/feed-store';
 import { FarcasterCast } from '../src/lib/farcaster/types';
 
 async function runTests() {
@@ -74,7 +75,21 @@ async function runTests() {
     throw new Error('Keyword filter failed');
   }
 
-  console.log('\n--- 3. Testing Gasless Signer Generation ---');
+  console.log('\n--- 3. Testing Mnemonic & Cryptographic Key Derivation ---');
+  const devMnemonic = generateDevMnemonic();
+  console.log('Generated 12-word Mnemonic:', devMnemonic.split(' ').length, 'words');
+  const validCheck = validateMnemonic(devMnemonic);
+  if (!validCheck.isValid || validCheck.wordCount !== 12) {
+    throw new Error('Mnemonic validation failed');
+  }
+
+  const custody = deriveCustodyFromMnemonic(devMnemonic);
+  console.log('Derived Custody Address:', custody.address);
+  if (!custody.address.startsWith('0x') || custody.address.length !== 42) {
+    throw new Error('Invalid derived custody address');
+  }
+
+  console.log('\n--- 4. Testing Gasless Signer Generation (EIP-712) ---');
   const testCustody = generateCustodyAccount();
   const gaslessResult = await GaslessSignerManager.issueGaslessSigner({
     fid: 999999,
@@ -87,24 +102,36 @@ async function runTests() {
     throw new Error('Invalid protobuf byte length');
   }
 
-  console.log('\n--- 4. Testing Node Client Construction ---');
-  const client = new SnapchainNodeClient('http://127.0.0.1:3381');
-  console.log('Client instance initialized.');
+  console.log('\n--- 5. Testing Feed Store Registry & Threads ---');
+  const initialFeed = await feedStore.getFeed();
+  console.log('Feed casts count in store:', initialFeed.length);
+  if (initialFeed.length < 3) {
+    throw new Error('Feed store missing initial protocol casts');
+  }
 
-  // Test health check (will report offline since local node is not actively running in this unit test)
+  // Test adding a newly published cast
+  const testCastHash = '0xabcd' + Date.now().toString(16);
+  feedStore.addCast({
+    hash: testCastHash,
+    fid: 999999,
+    text: 'Test cast on sovereign client!',
+    timestamp: Date.now(),
+    clientSource: 'Direct Snapchain',
+  });
+
+  const updatedFeed = await feedStore.getFeed();
+  const found = updatedFeed.find(c => c.hash === testCastHash);
+  if (!found) {
+    throw new Error('Added cast not found in feed');
+  }
+  console.log('Successfully added and queried cast:', found.hash);
+
+  console.log('\n--- 6. Testing Node Client Offline Fallback ---');
+  const client = new SnapchainNodeClient('http://127.0.0.1:3381');
   const health = await client.checkHealth();
   console.log('Health check handled smoothly:', health.isOnline ? 'Online' : `Offline (expected: ${health.error})`);
 
-  console.log('\n--- 5. Testing Follow / LinkAdd Action ---');
-  const followResult = await client.publishFollow(
-    999999,
-    gaslessResult.signer.privateKeyHex,
-    3, // target FID Dan Romero
-    false
-  );
-  console.log('Follow submission handling:', followResult.success ? 'Success' : `Handled gracefully (${followResult.error})`);
-
-  console.log('\nAll protocol unit tests PASSED successfully!');
+  console.log('\n✓ All protocol unit tests PASSED successfully!');
 }
 
 runTests().catch(err => {

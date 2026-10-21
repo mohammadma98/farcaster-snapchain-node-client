@@ -1,10 +1,31 @@
-import { mnemonicToAccount, privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
+import { mnemonicToAccount, privateKeyToAccount, generatePrivateKey, generateMnemonic, english } from 'viem/accounts';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex, hexToBytes, toHex } from 'viem';
 
 // Ensure ed25519 uses sha512
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
+
+/**
+ * Generate a standard 12-word BIP-39 mnemonic seed phrase
+ */
+export function generateDevMnemonic(): string {
+  return generateMnemonic(english);
+}
+
+/**
+ * Validate mnemonic seed phrase (must be 12 or 24 words)
+ */
+export function validateMnemonic(mnemonic: string): { isValid: boolean; wordCount: number; error?: string } {
+  const clean = mnemonic.trim();
+  if (!clean) return { isValid: false, wordCount: 0, error: 'Mnemonic cannot be empty' };
+  const words = clean.split(/\s+/);
+  const wordCount = words.length;
+  if (wordCount !== 12 && wordCount !== 24) {
+    return { isValid: false, wordCount, error: `Invalid word count (${wordCount}). Seed phrase must have 12 or 24 words.` };
+  }
+  return { isValid: true, wordCount };
+}
 
 /**
  * Farcaster Epoch: January 1, 2021 00:00:00 UTC (1609459200 seconds)

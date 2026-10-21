@@ -73,7 +73,9 @@ if [ "$CLIENT_TYPE" == "cli" ]; then
     echo -e "\n${GREEN}${BOLD}Launching Farcaster Interactive CLI Client...${NC}"
     npm run cli
 else
-    echo -e "\n${GREEN}${BOLD}Launching Farcaster Web Client & Documentation Microsite...${NC}"
-    echo -e "Accessible at: ${BOLD}http://localhost:3000${NC}"
+    echo -e "\n${GREEN}${BOLD}Launching Sovereign Farcaster Web Client...${NC}"
+    echo -e "Interface:  ${BOLD}Light Theme (farcaster.xyz standard)${NC}"
+    echo -e "Read Node:  ${BOLD}${READ_NODE_URL}${NC}"
+    echo -e "Accessible: ${BOLD}http://localhost:3000${NC}"
     npm run dev
 fi
