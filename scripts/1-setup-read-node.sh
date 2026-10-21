@@ -265,10 +265,10 @@ mkdir -p "${SNAPCHAIN_DIR}/.rocks"
 
 # Clean signal trap for background downloads & FIFOs
 PIPE_FIFO=""
-CLEANUP_PID=""
 TAR_PID=""
 BUFFER_DIR=""
-trap 'echo -e "\n${YELLOW}[!] Interrupted by user. Cleaning up pipeline resources...${NC}"; exec 3>&- 2>/dev/null || true; [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO"; [ -n "$CLEANUP_PID" ] && kill -9 "$CLEANUP_PID" 2>/dev/null || true; [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true; [ -n "$BUFFER_DIR" ] && rm -rf "$BUFFER_DIR" 2>/dev/null || true; exit 1' INT TERM
+declare -A DOWNLOAD_PIDS=()
+trap 'echo -e "\n${YELLOW}[!] Interrupted by user. Cleaning up pipeline resources...${NC}"; exec 3>&- 2>/dev/null || true; [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO"; for p in "${DOWNLOAD_PIDS[@]}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true; done; [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true; [ -n "$BUFFER_DIR" ] && rm -rf "$BUFFER_DIR" 2>/dev/null || true; exit 1' INT TERM
 
 echo -e "  • Starting RAM-Assisted Concurrent Chunk Streaming Pipeline..."
 echo -e "    ${CYAN}Notice: Chunks are streamed through RAM (/dev/shm) directly into RocksDB.${NC}"
@@ -319,14 +319,26 @@ for SHARD_ID in "${SHARDS[@]}"; do
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
     
-    # Require at least 250 MB free in /dev/shm for double-buffering (~70MB per chunk)
-    if [ "${SHM_AVAIL_MB:-0}" -ge 250 ]; then
-        echo -e "  - RAM Buffer:     ${GREEN}Active in-memory double-buffer (/dev/shm, ${SHM_AVAIL_MB} MB free)${NC}"
+    # Safety reserve: Keep at least 350 MB free in /dev/shm for OS safety headroom
+    SAFETY_RESERVE_MB=350
+
+    if [ "${SHM_AVAIL_MB:-0}" -ge $(( SAFETY_RESERVE_MB + 150 )) ]; then
+        USABLE_SHM_MB=$(( SHM_AVAIL_MB - SAFETY_RESERVE_MB ))
+        # Each compressed chunk is ~70 MB. Allow up to USABLE_SHM_MB / 75 chunks buffered in RAM:
+        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 75 ))
+        if [ "$MAX_BUFFERED_CHUNKS" -lt 2 ]; then
+            MAX_BUFFERED_CHUNKS=2
+        fi
+        CONCURRENT_DOWNLOADS=3
+        echo -e "  - RAM Buffer:     ${GREEN}Dynamic in-memory pool (/dev/shm, ${SHM_AVAIL_MB} MB free, queue up to ${MAX_BUFFERED_CHUNKS} chunks)${NC}"
+        echo -e "  - Concurrency:    ${CYAN}${CONCURRENT_DOWNLOADS} parallel streams with continuous lookahead prefetch${NC}"
         mkdir -p "$BUFFER_DIR"
         USE_RAM=true
     else
         BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
-        echo -e "  - RAM Buffer:     ${YELLOW}Constrained RAM; buffering chunk on disk (${BUFFER_DIR})${NC}"
+        MAX_BUFFERED_CHUNKS=3
+        CONCURRENT_DOWNLOADS=2
+        echo -e "  - RAM Buffer:     ${YELLOW}Constrained RAM; buffering on disk (${BUFFER_DIR})${NC}"
         mkdir -p "$BUFFER_DIR"
         USE_RAM=false
     fi
@@ -347,34 +359,70 @@ for SHARD_ID in "${SHARDS[@]}"; do
     CHUNK_LIST=$(python3 -c "import json; print(' '.join(json.loads('''$META_DATA''')['chunks']))")
     CHUNK_ARRAY=($CHUNK_LIST)
 
-    # Download Chunk 1 first
-    FIRST_CHUNK="${CHUNK_ARRAY[0]}"
-    FIRST_URL="${R2_PUBLIC_BASE}/${KEY_BASE}/${FIRST_CHUNK}"
-    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$FIRST_URL" -o "${BUFFER_DIR}/${FIRST_CHUNK}"
-
     START_TIME=$(date +%s)
     BYTES_PROCESSED=0
+
+    # Dynamic Asynchronous Prefetch Queue Manager
+    declare -A DOWNLOAD_PIDS=()
+    NEXT_DOWNLOAD_IDX=0
+
+    refill_download_queue() {
+        local curr_extract_idx=$1
+        while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
+            # Enforce max RAM buffer capacity (Backpressure)
+            if [ $(( NEXT_DOWNLOAD_IDX - curr_extract_idx )) -ge "$MAX_BUFFERED_CHUNKS" ]; then
+                break
+            fi
+
+            # Enforce max concurrent downloads
+            local active=0
+            for p in "${DOWNLOAD_PIDS[@]}"; do
+                if kill -0 "$p" 2>/dev/null; then
+                    active=$(( active + 1 ))
+                fi
+            done
+
+            if [ "$active" -ge "$CONCURRENT_DOWNLOADS" ]; then
+                break
+            fi
+
+            local chunk_name="${CHUNK_ARRAY[NEXT_DOWNLOAD_IDX]}"
+            local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+            curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${BUFFER_DIR}/${chunk_name}" &
+            DOWNLOAD_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
+            NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + 1 ))
+        done
+    }
+
+    # Seed the initial download pipeline
+    refill_download_queue 0
 
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
         CURRENT_CHUNK="${CHUNK_ARRAY[i]}"
         CURRENT_FILE="${BUFFER_DIR}/${CURRENT_CHUNK}"
-        NEXT_INDEX=$(( i + 1 ))
 
-        # If there is a next chunk, launch concurrent background download into RAM buffer
-        NEXT_PID=""
-        if [ "$NEXT_INDEX" -lt "$TOTAL_CHUNKS" ]; then
-            NEXT_CHUNK="${CHUNK_ARRAY[NEXT_INDEX]}"
-            NEXT_URL="${R2_PUBLIC_BASE}/${KEY_BASE}/${NEXT_CHUNK}"
-            curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$NEXT_URL" -o "${BUFFER_DIR}/${NEXT_CHUNK}" &
-            NEXT_PID=$!
-            CLEANUP_PID="$NEXT_PID"
+        # Refill download pipeline before waiting
+        refill_download_queue "$i"
+
+        # Wait for the current chunk to finish downloading if still in progress
+        if [ -n "${DOWNLOAD_PIDS[$i]:-}" ]; then
+            wait "${DOWNLOAD_PIDS[$i]}" || {
+                echo -e "\n${RED}[ERROR] Download failed for chunk ${CURRENT_CHUNK}.${NC}"
+                exec 3>&- 2>/dev/null || true
+                kill -9 "$TAR_PID" 2>/dev/null || true
+                exit 1
+            }
+            unset DOWNLOAD_PIDS["$i"]
         fi
+
+        # Immediately queue next chunk downloads to keep network at 100% saturation
+        refill_download_queue "$i"
 
         # Decompress current chunk from RAM directly into descriptor 3 (Pipe stays open)
         if [ -s "$CURRENT_FILE" ]; then
             CHUNK_SIZE=$(stat -c%s "$CURRENT_FILE" 2>/dev/null || echo 70209256)
             gzip -dc "$CURRENT_FILE" >&3
-            # Instantly purge compressed chunk from RAM/disk to reclaim memory
+            # Instantly purge compressed chunk from RAM to reclaim memory
             rm -f "$CURRENT_FILE"
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
         else
@@ -397,17 +445,6 @@ for SHARD_ID in "${SHARDS[@]}"; do
             fi
         fi
 
-        # Wait for concurrent background download of next chunk to complete
-        if [ -n "$NEXT_PID" ]; then
-            wait "$NEXT_PID" || {
-                echo -e "\n${RED}[ERROR] Download failed for chunk index ${NEXT_INDEX}.${NC}"
-                exec 3>&- 2>/dev/null || true
-                kill -9 "$TAR_PID" 2>/dev/null || true
-                exit 1
-            }
-            CLEANUP_PID=""
-        fi
-
         # Live Progress & Throughput Display
         NOW=$(date +%s)
         ELAPSED=$(( NOW - START_TIME ))
@@ -420,15 +457,24 @@ for SHARD_ID in "${SHARDS[@]}"; do
         DONE_COUNT=$(( i + 1 ))
         PERCENT=$(( DONE_COUNT * 100 / TOTAL_CHUNKS ))
 
-        printf "\r  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Elapsed: %02dm:%02ds" \
+        # Measure active RAM chunks
+        RAM_BUFFERED=$(ls -1 "$BUFFER_DIR" 2>/dev/null | wc -l || echo 0)
+
+        printf "\r  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Queue: %2d chunks | Elapsed: %02dm:%02ds" \
             "$SHARD_ID" "$NUM_SHARDS" "$PERCENT" "$DONE_COUNT" "$TOTAL_CHUNKS" \
             "$(format_bytes "$BYTES_PROCESSED")" "$(format_speed "$CURR_SPEED")" \
+            "$RAM_BUFFERED" \
             $(( ELAPSED / 60 )) $(( ELAPSED % 60 ))
 
         # If tar cleanly completed end-of-archive marker, we can conclude this shard
         if [ "$TAR_COMPLETED" == "true" ]; then
             break
         fi
+    done
+
+    # Cleanup remaining download jobs if tar finished early
+    for p in "${DOWNLOAD_PIDS[@]}"; do
+        [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
 
     # Close FIFO write descriptor so tar sees EOF cleanly if still running
