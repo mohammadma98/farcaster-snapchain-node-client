@@ -213,11 +213,8 @@ with open('docker-compose.yml', 'w') as f:
     f.writelines(out)
 " 2>/dev/null || true
 
-    # Comment out statsd section inside config.toml entrypoint
-    sed -i 's/\[statsd\]/# [statsd]/g' docker-compose.yml 2>/dev/null || true
-    sed -i 's/prefix="snapchain"/# prefix="snapchain"/g' docker-compose.yml 2>/dev/null || true
-    sed -i 's/addr="statsd:8125"/# addr="statsd:8125"/g' docker-compose.yml 2>/dev/null || true
-    sed -i 's/use_tags=true/# use_tags=true/g' docker-compose.yml 2>/dev/null || true
+    # Point statsd to local loopback UDP sink so Rust prefix validation passes without running external metrics containers
+    sed -i 's/addr="statsd:8125"/addr="127.0.0.1:8125"/g' docker-compose.yml 2>/dev/null || true
 else
     # Remap Grafana port to 3005 to reserve 3000 for Farcaster Web Client
     sed -i 's/3000:3000/3005:3000/g' docker-compose.yml 2>/dev/null || true
