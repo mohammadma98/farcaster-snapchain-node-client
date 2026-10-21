@@ -45,7 +45,7 @@ export class SnapchainNodeClient {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(`${cleanUrl}/v1/info?dbstats=1`, {
         signal: controller.signal,
@@ -81,8 +81,35 @@ export class SnapchainNodeClient {
         isOnline: false,
         latencyMs: Date.now() - startTime,
         url: cleanUrl,
-        error: err.name === 'AbortError' ? 'Connection timed out (6s)' : (err.message || 'Node unreachable'),
+        error:
+          err.name === 'AbortError'
+            ? 'Connection timed out (10s)'
+            : err.message || 'Node unreachable',
       };
+    }
+  }
+
+  /**
+   * Fetch known FIDs from the local Snapchain node
+   */
+  async getFids(nodeUrl = this.defaultNodeUrl, pageSize = 30): Promise<number[]> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/fids?pageSize=${pageSize}&reverse=true`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      if (!response.ok) return [];
+      const data = await response.json();
+      if (Array.isArray(data.fids)) {
+        return data.fids.map((f: any) => Number(f)).filter((f: number) => !isNaN(f) && f > 0);
+      }
+      return [];
+    } catch {
+      return [];
     }
   }
 
@@ -102,7 +129,7 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/userNameProofByName?name=${encodeURIComponent(cleanName)}`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(8000),
         }
       );
       if (!res.ok) return null;
@@ -121,6 +148,27 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Fetch username proofs by FID from the Snapchain node
+   */
+  async getUserNameProofs(fid: number, nodeUrl = this.defaultNodeUrl): Promise<string | null> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    try {
+      const response = await fetch(`${cleanUrl}/v1/userNameProofsByFid?fid=${fid}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      if (Array.isArray(data.proofs) && data.proofs.length > 0) {
+        return data.proofs[0].name || null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Fetch user metadata (Bio, Display Name, PFP, Username) from the local node
    */
   async getUserProfile(fid: number, nodeUrl = this.defaultNodeUrl): Promise<FarcasterUser> {
@@ -130,25 +178,35 @@ export class SnapchainNodeClient {
     try {
       const response = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
       });
 
-      if (!response.ok) return profile;
+      if (response.ok) {
+        const data = await response.json();
+        const messages = data.messages || [];
 
-      const data = await response.json();
-      const messages = data.messages || [];
+        for (const msg of messages) {
+          const body = msg.data?.userDataBody;
+          if (!body) continue;
 
-      for (const msg of messages) {
-        const body = msg.data?.userDataBody;
-        if (!body) continue;
-
-        // USER_DATA_TYPE_PFP = 1, DISPLAY = 2, BIO = 3, USERNAME = 6
-        if (body.type === 1 || body.type === 'USER_DATA_TYPE_PFP') profile.pfpUrl = body.value;
-        if (body.type === 2 || body.type === 'USER_DATA_TYPE_DISPLAY') profile.displayName = body.value;
-        if (body.type === 3 || body.type === 'USER_DATA_TYPE_BIO') profile.bio = body.value;
-        if (body.type === 6 || body.type === 'USER_DATA_TYPE_USERNAME') profile.username = body.value;
+          // USER_DATA_TYPE_PFP = 1, DISPLAY = 2, BIO = 3, USERNAME = 6
+          if (body.type === 1 || body.type === 'USER_DATA_TYPE_PFP') profile.pfpUrl = body.value;
+          if (body.type === 2 || body.type === 'USER_DATA_TYPE_DISPLAY') profile.displayName = body.value;
+          if (body.type === 3 || body.type === 'USER_DATA_TYPE_BIO') profile.bio = body.value;
+          if (body.type === 6 || body.type === 'USER_DATA_TYPE_USERNAME') profile.username = body.value;
+        }
       }
     } catch (err) {
       console.warn(`Could not load user profile for FID ${fid}:`, err);
+    }
+
+    // If username is not set in userData, check userNameProofsByFid on the node
+    if (!profile.username) {
+      const proofName = await this.getUserNameProofs(fid, cleanUrl);
+      if (proofName) {
+        profile.username = proofName;
+        if (!profile.displayName) profile.displayName = proofName;
+      }
     }
 
     return profile;
@@ -169,7 +227,7 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/castsByFid?fid=${fid}&pageSize=${pageSize}&reverse=true`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(4000),
+          signal: AbortSignal.timeout(10000),
         }
       );
 
@@ -202,7 +260,6 @@ export class SnapchainNodeClient {
           mentions: castBody.mentions,
         };
 
-        // Annotate client attribution
         const attr = identifyCastClient(cast);
         cast.clientSource = attr.clientName;
 
@@ -232,7 +289,7 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/castById?fid=${fid}&hash=${cleanHash}`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(8000),
         }
       );
 
@@ -285,7 +342,7 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/castsByParent?fid=${parentFid}&hash=${cleanHash}&pageSize=${pageSize}&reverse=true`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(8000),
         }
       );
 
@@ -486,6 +543,7 @@ export class SnapchainNodeClient {
 
   /**
    * Submit raw protobuf bytes to the node's /v1/submitMessage
+   * Uses 25-second timeout and Buffer payload for rock-solid Node.js binary transmission.
    */
   private async submitMessageProtobuf(
     encodedBytes: Uint8Array,
@@ -494,24 +552,55 @@ export class SnapchainNodeClient {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
 
     try {
+      const bufferPayload = Buffer.from(
+        encodedBytes.buffer,
+        encodedBytes.byteOffset,
+        encodedBytes.byteLength
+      );
+
       const response = await fetch(`${cleanUrl}/v1/submitMessage`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: encodedBytes as any,
-        signal: AbortSignal.timeout(4000),
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(bufferPayload.length),
+        },
+        body: bufferPayload as any,
+        signal: AbortSignal.timeout(25000), // 25s timeout for RocksDB & mempool validation
       });
 
       if (!response.ok) {
         const text = await response.text();
-        return { success: false, error: `Node rejected message (${response.status}): ${text}` };
+        return {
+          success: false,
+          error: `Snapchain node rejected message (${response.status}): ${text}`,
+        };
       }
 
       const result = await response.json().catch(() => ({}));
-      const hash = result.hash ? (typeof result.hash === 'string' ? result.hash : bytesToHexString(result.hash)._unsafeUnwrap()) : undefined;
+      const hash = result.hash
+        ? typeof result.hash === 'string'
+          ? result.hash
+          : bytesToHexString(result.hash)._unsafeUnwrap()
+        : undefined;
 
       return { success: true, hash };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network submission error' };
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+        return {
+          success: false,
+          error: `Connection to Snapchain read node (${cleanUrl}/v1/submitMessage) timed out after 25s. Please verify your local node is running and syncing on port 3381.`,
+        };
+      }
+      if (err.cause?.code === 'ECONNREFUSED' || err.code === 'ECONNREFUSED') {
+        return {
+          success: false,
+          error: `Connection refused by node at ${cleanUrl}. Please ensure your Snapchain read node container is active and listening on port 3381.`,
+        };
+      }
+      return {
+        success: false,
+        error: err.message || 'Network submission error contacting Snapchain node',
+      };
     }
   }
 }

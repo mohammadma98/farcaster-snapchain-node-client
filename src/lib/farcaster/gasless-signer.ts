@@ -15,10 +15,10 @@ import { ActiveSigner, GaslessSignerConfig } from './types';
 /**
  * Manage Gasless Signer / App Key registration
  *
- * Ground Truth: Since Engine V16, Snapchain supports gasless signers.
+ * Ground Truth (Cast 3): Since Engine V16, Snapchain supports gasless signers.
  * The signer is registered by submitting a KEY_ADD message to a node,
  * authorized by an EIP-712 signature from the FID's custody address.
- * No Optimism ETH or transaction is required!
+ * Zero Optimism ETH or onchain transactions are required!
  */
 export class GaslessSignerManager {
   /**
@@ -29,11 +29,10 @@ export class GaslessSignerManager {
       const cleanUrl = nodeUrl.replace(/\/$/, '');
       const response = await fetch(`${cleanUrl}/v1/signersByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (!response.ok) {
-        // If node doesn't have it or 404, default to 0
         return 0;
       }
 
@@ -64,7 +63,7 @@ export class GaslessSignerManager {
     const keyPair = generateEd25519KeyPair();
     const edSigner = new NobleEd25519Signer(keyPair.privateKey);
 
-    // 3. Get current nonce
+    // 3. Get current nonce from local node
     const currentNonce = await this.getCurrentUserNonce(nodeUrl, fid);
     const nextNonce = currentNonce + 1;
 
@@ -123,16 +122,26 @@ export class GaslessSignerManager {
   /**
    * Submit the encoded KEY_ADD message directly to the Snapchain Read Node
    */
-  static async submitKeyAddToNode(nodeUrl: string, encodedBytes: Uint8Array): Promise<{ success: boolean; hash?: string; error?: string }> {
+  static async submitKeyAddToNode(
+    nodeUrl: string,
+    encodedBytes: Uint8Array
+  ): Promise<{ success: boolean; hash?: string; error?: string }> {
     try {
       const cleanUrl = nodeUrl.replace(/\/$/, '');
+      const bufferPayload = Buffer.from(
+        encodedBytes.buffer,
+        encodedBytes.byteOffset,
+        encodedBytes.byteLength
+      );
+
       const response = await fetch(`${cleanUrl}/v1/submitMessage`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
+          'Content-Length': String(bufferPayload.length),
         },
-        body: encodedBytes as any,
-        signal: AbortSignal.timeout(4000),
+        body: bufferPayload as any,
+        signal: AbortSignal.timeout(25000), // 25s timeout
       });
 
       if (!response.ok) {
@@ -143,7 +152,13 @@ export class GaslessSignerManager {
       const result = await response.json().catch(() => ({}));
       return { success: true, hash: result.hash };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error submitting to node' };
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+        return {
+          success: false,
+          error: `Signer submission timed out after 25s. Is your Snapchain node reachable on port 3381?`,
+        };
+      }
+      return { success: false, error: err.message || 'Network error submitting KEY_ADD to node' };
     }
   }
 }

@@ -52,90 +52,8 @@ interface LoggedInUser {
   isSandbox: boolean;
 }
 
-// Initial demo casts showcasing rich Farcaster ecosystem diversity
-const INITIAL_DEMO_CASTS: FarcasterCast[] = [
-  {
-    hash: '0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8',
-    fid: 2,
-    text: 'Decentralized social networks only work when anyone can run a node and publish with zero permission. Snapchain changes the game.',
-    timestamp: Date.now() - 1000 * 60 * 14,
-    author: {
-      fid: 2,
-      username: 'v',
-      displayName: 'Varun Srinivasan',
-      pfpUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face',
-    },
-    clientSource: 'Direct Snapchain',
-    reactions: { likesCount: 42, recastsCount: 12, likedByMe: false, recastByMe: false },
-  },
-  {
-    hash: '0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d',
-    fid: 3,
-    text: 'Big update to Warpcast today! Check out the new channel navigation and high-speed notifications.',
-    timestamp: Date.now() - 1000 * 60 * 38,
-    author: {
-      fid: 3,
-      username: 'dwr.eth',
-      displayName: 'Dan Romero',
-      pfpUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face',
-    },
-    parentUrl: 'https://warpcast.com/~/channel/farcaster',
-    clientSource: 'Warpcast',
-    reactions: { likesCount: 88, recastsCount: 29, likedByMe: true, recastByMe: false },
-  },
-  {
-    hash: '0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b',
-    fid: 194,
-    text: 'Power users need keyboard shortcuts, bulk scheduling, and multi-account posting. Built this on Supercast!',
-    timestamp: Date.now() - 1000 * 60 * 85,
-    author: {
-      fid: 194,
-      username: 'woj.eth',
-      displayName: 'Wojciech',
-      pfpUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop&crop=face',
-    },
-    embeds: [{ url: 'https://supercast.xyz/features' }],
-    clientSource: 'Supercast',
-    reactions: { likesCount: 31, recastsCount: 7, likedByMe: false, recastByMe: false },
-  },
-  {
-    hash: '0x5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c',
-    fid: 8012,
-    text: 'Testing direct node submission with gasless Ed25519 keypair. No Optimism transaction needed!',
-    timestamp: Date.now() - 1000 * 60 * 120,
-    author: {
-      fid: 8012,
-      username: 'builder.eth',
-      displayName: 'Sovereign Builder',
-      pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-    },
-    embeds: [
-      {
-        castId: {
-          fid: 2,
-          hash: '0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8',
-        },
-      },
-    ],
-    clientSource: 'Direct Snapchain',
-    reactions: { likesCount: 19, recastsCount: 5, likedByMe: false, recastByMe: false },
-  },
-  {
-    hash: '0x7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f',
-    fid: 4321,
-    text: 'Shared my new decentralized photo diary via @phaver. Mobile-first Web3 social is here.',
-    timestamp: Date.now() - 1000 * 60 * 180,
-    author: {
-      fid: 4321,
-      username: 'lensfan',
-      displayName: 'Elena Web3',
-      pfpUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face',
-    },
-    embeds: [{ url: 'https://phaver.com/post/9912' }],
-    clientSource: 'Phaver',
-    reactions: { likesCount: 14, recastsCount: 2, likedByMe: false, recastByMe: false },
-  },
-];
+// Initial casts stream from local node
+const INITIAL_DEMO_CASTS: FarcasterCast[] = [];
 
 export function ClientApp({ lang }: ClientAppProps) {
   const t = translations[lang];
@@ -218,7 +136,7 @@ export function ClientApp({ lang }: ClientAppProps) {
         fid: testFid,
         username: 'sandbox_builder',
         displayName: 'Sandbox Developer',
-        pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        pfpUrl: `https://avatar.vercel.sh/${sandboxCustody.address}`,
         custodyAddress: sandboxCustody.address,
         activeSignerKey: signer.publicKeyHex,
         signerPrivateKey: signer.privateKeyHex,
@@ -262,7 +180,7 @@ export function ClientApp({ lang }: ClientAppProps) {
         fid: fidNum,
         username: profile.username || `user_${fidNum}`,
         displayName: profile.displayName || `FID ${fidNum}`,
-        pfpUrl: profile.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${fidNum}`,
         custodyAddress: profile.custodyAddress || '0x...',
         activeSignerKey: signer.publicKeyHex,
         signerPrivateKey: signer.privateKeyHex,
@@ -303,7 +221,7 @@ export function ClientApp({ lang }: ClientAppProps) {
         fid: testFid,
         username: 'sandbox_builder',
         displayName: 'Sandbox Developer',
-        pfpUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+        pfpUrl: `https://avatar.vercel.sh/${sandboxCustody.address}`,
         custodyAddress: sandboxCustody.address,
         activeSignerKey: signer.publicKeyHex,
         signerPrivateKey: signer.privateKeyHex,
@@ -489,7 +407,7 @@ export function ClientApp({ lang }: ClientAppProps) {
         fid: quoteEmbed.castId.fid,
         username: `fid_${quoteEmbed.castId.fid}`,
         displayName: `FID ${quoteEmbed.castId.fid}`,
-        pfpUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face',
+        pfpUrl: `https://avatar.vercel.sh/${quoteEmbed.castId.fid}`,
       },
     };
   };
@@ -682,7 +600,7 @@ export function ClientApp({ lang }: ClientAppProps) {
             {/* Composer Input Area */}
             <div className="flex items-start gap-3">
               <img
-                src={currentUser?.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face'}
+                src={currentUser?.pfpUrl || 'https://avatar.vercel.sh/user'}
                 alt="Me"
                 className="h-10 w-10 rounded-full object-cover border border-purple-500/30 shrink-0 mt-1"
               />
@@ -768,7 +686,7 @@ export function ClientApp({ lang }: ClientAppProps) {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <img
-                          src={cast.author?.pfpUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}
+                          src={cast.author?.pfpUrl || `https://avatar.vercel.sh/${cast.fid}`}
                           alt={cast.author?.username}
                           className="h-10 w-10 rounded-full object-cover border border-purple-500/20"
                         />

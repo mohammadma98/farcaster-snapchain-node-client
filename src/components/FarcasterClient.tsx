@@ -93,7 +93,7 @@ export function FarcasterClient() {
 
   // Suggested Follows
   const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>([]);
-  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([320011, 2, 3]));
+  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([2, 3, 37]));
 
   // Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -103,6 +103,16 @@ export function FarcasterClient() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  const updateNodeUrl = (newUrl: string) => {
+    const clean = newUrl.trim();
+    setNodeUrl(clean);
+    try {
+      localStorage.setItem('farcaster_node_url', clean);
+    } catch {
+      // ignore
+    }
+  };
+
   // 1. Initial Load & Restore Session
   useEffect(() => {
     // Restore session from localStorage if exists
@@ -110,6 +120,10 @@ export function FarcasterClient() {
       const saved = localStorage.getItem('farcaster_session');
       if (saved) {
         setSession(JSON.parse(saved));
+      }
+      const savedNode = localStorage.getItem('farcaster_node_url');
+      if (savedNode) {
+        setNodeUrl(savedNode);
       }
     } catch {
       // ignore
@@ -795,7 +809,7 @@ export function FarcasterClient() {
                     <img
                       src={
                         session?.pfpUrl ||
-                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face'
+                        (session ? `https://avatar.vercel.sh/${session.fid}` : 'https://avatar.vercel.sh/guest')
                       }
                       alt="Avatar"
                       className="h-10 w-10 rounded-full object-cover border border-purple-200 shrink-0"
@@ -863,10 +877,24 @@ export function FarcasterClient() {
                     <p className="text-xs text-slate-500 font-medium">Syncing feed from Snapchain...</p>
                   </div>
                 ) : casts.length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-2">
-                    <MessageSquare className="h-8 w-8 text-slate-300 mx-auto" />
-                    <h3 className="font-bold text-sm text-slate-700">No casts found</h3>
-                    <p className="text-xs text-slate-500">Be the first to publish a cast to your node!</p>
+                  <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 mb-1">
+                      <Layers className="h-6 w-6" />
+                    </div>
+                    <h3 className="font-bold text-sm text-slate-800">No Casts on Local Node Yet</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                      Connected to standalone Snapchain Read Node at{' '}
+                      <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-purple-700">{nodeUrl}</code>.
+                      If your node is syncing initial snapshot blocks, posts will appear as shard blocks finalize.
+                      You can publish a new cast right now to post directly into the local mempool!
+                    </p>
+                    <button
+                      onClick={() => fetchFeed()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-purple-700 text-white hover:bg-purple-800 transition-colors shadow-xs"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Refresh Local Node Feed
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1336,10 +1364,41 @@ export function FarcasterClient() {
                   </button>
                 </div>
 
+                {/* Endpoint Configuration Input */}
+                <div className="p-4 rounded-2xl bg-purple-50/60 border border-purple-200/80 space-y-2.5">
+                  <label className="text-xs font-bold text-purple-950 block">
+                    Snapchain Read Node URL (:3381)
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={nodeUrl}
+                      onChange={(e) => updateNodeUrl(e.target.value)}
+                      placeholder="http://127.0.0.1:3381"
+                      className="flex-1 px-3.5 py-2 text-xs font-mono bg-white border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-slate-900"
+                    />
+                    <button
+                      onClick={() => {
+                        pingNode();
+                        fetchFeed();
+                        fetchSuggestedUsers();
+                        showToast('Connected and updated node URL');
+                      }}
+                      className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl transition-all shadow-xs shrink-0 flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin' : ''}`} />
+                      <span>Connect & Ping</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-purple-900/70">
+                    All client reads and <code className="font-mono font-semibold">:3381/v1/submitMessage</code> writes connect directly to this node.
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
                     <span className="text-slate-400 block text-[11px]">HTTP Endpoint</span>
-                    <span className="font-mono font-bold text-slate-800">{nodeUrl}</span>
+                    <span className="font-mono font-bold text-slate-800 break-all">{nodeUrl}</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
                     <span className="text-slate-400 block text-[11px]">Node Status</span>
@@ -1392,15 +1451,27 @@ export function FarcasterClient() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search users (@username)..."
-                  className="w-full pl-9 pr-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all"
+                  placeholder="Search user proof (@username or FID)..."
+                  className="w-full pl-9 pr-8 py-2 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all"
                 />
+                {isSearching && (
+                  <RefreshCw className="h-3.5 w-3.5 text-purple-600 animate-spin absolute right-3 top-2.5" />
+                )}
               </div>
+
+              {/* Empty / Searching Feedback */}
+              {!isSearching && searchQuery.trim() && searchResults.length === 0 && (
+                <div className="p-3 text-center text-xs text-slate-400 bg-slate-50 rounded-xl">
+                  No account proof found on node for "{searchQuery}"
+                </div>
+              )}
 
               {/* Search Results List */}
               {searchResults.length > 0 && (
                 <div className="space-y-2 pt-1 border-t border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Results</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Node Results ({searchResults.length})
+                  </span>
                   {searchResults.map((u) => (
                     <div
                       key={u.fid}
@@ -1414,12 +1485,15 @@ export function FarcasterClient() {
                           src={u.pfpUrl || `https://avatar.vercel.sh/${u.fid}`}
                           alt={u.username}
                           className="h-7 w-7 rounded-full object-cover shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://avatar.vercel.sh/${u.fid}`;
+                          }}
                         />
                         <div className="truncate">
                           <span className="font-semibold text-xs text-slate-900 block truncate">
                             {u.displayName || `@${u.username}`}
                           </span>
-                          <span className="text-[10px] text-slate-400 block truncate">@{u.username}</span>
+                          <span className="text-[10px] text-slate-400 block truncate">@{u.username} • FID {u.fid}</span>
                         </div>
                       </div>
                       <button
