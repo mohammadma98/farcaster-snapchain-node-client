@@ -697,7 +697,7 @@ case "$AUTO_STEP2" in
             exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
         else
             TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
-            curl -fsSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh -o "$TMP_SCRIPT"
+            curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
             chmod +x "$TMP_SCRIPT"
             exec bash "$TMP_SCRIPT"
         fi
