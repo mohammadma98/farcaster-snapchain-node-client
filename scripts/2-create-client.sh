@@ -47,22 +47,40 @@ if ! command -v git &> /dev/null; then
     sudo apt-get install -y git
 fi
 
-# Ensure repository exists locally
+# Ensure repository exists locally and is updated to the latest commit
 REPO_DIR="farcaster-snapchain-node-client"
-if [ ! -f "package.json" ]; then
-    if [ -d "$REPO_DIR" ] && [ -f "$REPO_DIR/package.json" ]; then
-        cd "$REPO_DIR"
-    else
-        echo -e "\n${YELLOW}Cloning repository to local machine...${NC}"
-        git clone https://github.com/mohammadma98/farcaster-snapchain-node-client.git
-        cd "$REPO_DIR"
-    fi
+if [ -f "package.json" ] && [ -d ".git" ]; then
+    echo -e "\n${YELLOW}Updating local repository to latest version (git reset --hard origin/main)...${NC}"
+    git fetch origin main > /dev/null 2>&1 || true
+    git reset --hard origin/main
+elif [ -d "$REPO_DIR" ] && [ -f "$REPO_DIR/package.json" ]; then
+    cd "$REPO_DIR"
+    echo -e "\n${YELLOW}Updating local repository to latest version (git reset --hard origin/main)...${NC}"
+    git fetch origin main > /dev/null 2>&1 || true
+    git reset --hard origin/main
+else
+    echo -e "\n${YELLOW}Cloning repository to local machine...${NC}"
+    git clone https://github.com/mohammadma98/farcaster-snapchain-node-client.git
+    cd "$REPO_DIR"
 fi
 
-# Install dependencies if node_modules missing
+# Ensure dependencies are installed and up to date
 if [ ! -d "node_modules" ]; then
     echo -e "\n${YELLOW}Installing client dependencies...${NC}"
     npm install
+fi
+
+# Clear stale Next.js build cache to guarantee the new light-theme UI loads
+rm -rf .next
+
+# Terminate any old process occupying port 3000
+if command -v fuser &> /dev/null; then
+    fuser -k 3000/tcp > /dev/null 2>&1 || true
+elif command -v lsof &> /dev/null; then
+    PID=$(lsof -t -i:3000 2>/dev/null || echo "")
+    if [ -n "$PID" ]; then
+        kill -9 "$PID" 2>/dev/null || true
+    fi
 fi
 
 # Set local environment pointing to local node
