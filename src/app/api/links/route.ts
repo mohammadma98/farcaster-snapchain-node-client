@@ -4,6 +4,39 @@ import { feedStore } from '@/lib/farcaster/feed-store';
 
 export const dynamic = 'force-dynamic';
 
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const fidParam = searchParams.get('fid');
+    if (!fidParam) {
+      return NextResponse.json(
+        { status: 'error', error: 'Missing fid query parameter' },
+        { status: 400 }
+      );
+    }
+
+    const fid = parseInt(fidParam, 10);
+    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+
+    const { fids, users } = await defaultNodeClient.getFollowsByFid(fid, nodeUrl);
+    const sessionFollows = feedStore.getFollowedFids(fid);
+    const allFollowedFids = Array.from(new Set([...fids, ...sessionFollows]));
+
+    return NextResponse.json({
+      status: 'ok',
+      fid,
+      following: allFollowedFids,
+      users,
+      count: allFollowedFids.length,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { status: 'error', error: err.message || 'Failed to fetch follows' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -31,7 +64,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Update local state
-    const isNowFollowing = feedStore.toggleFollow(targetFid, !!isRemove);
+    const isNowFollowing = feedStore.toggleFollow(targetFid, !!isRemove, fid);
 
     return NextResponse.json({
       status: 'ok',

@@ -10,7 +10,8 @@ import { defaultNodeClient } from './node-client';
 class FeedStore {
   private casts: Map<string, FarcasterCast> = new Map();
   private users: Map<number, FarcasterUser> = new Map();
-  private followedFids: Set<number> = new Set([37, 432209]);
+  private userFollows: Map<number, Set<number>> = new Map();
+  private defaultFollowedFids: Set<number> = new Set([37, 432209]);
 
   constructor() {
     this.registerUser({
@@ -287,66 +288,24 @@ class FeedStore {
   }
 
   /**
-   * Get feed casts directly from the local Snapchain read node
+   * Filter, populate authors, and sort casts strictly in reverse chronological order
    */
-  public async getFeed(options?: {
-    limit?: number;
-    sourceFilter?: string;
-    fid?: number;
-    nodeUrl?: string;
-  }): Promise<FarcasterCast[]> {
-    const limit = options?.limit || 50;
-    const targetNodeUrl = options?.nodeUrl || 'http://127.0.0.1:3381';
+  private filterAndSortCasts(
+    castsList: FarcasterCast[],
+    sourceFilter?: string,
+    limit = 40
+  ): FarcasterCast[] {
+    // Only show top-level casts in the feed (replies appear inside threads)
+    let filtered = castsList.filter((c) => !c.parentCastId);
 
-    // 1. Fetch real casts directly from the Snapchain Read Node
-    if (targetNodeUrl) {
-      try {
-        let targetFids: number[] = [];
-
-        if (options?.fid) {
-          targetFids = [options.fid];
-        } else {
-          // Discover active FIDs directly from the local node via /v1/fids
-          const nodeFids = await defaultNodeClient.getFids(targetNodeUrl, 20);
-          const seedFids = [2, 3, 37]; // Key network founders & participants
-          targetFids = Array.from(new Set([...nodeFids, ...seedFids, ...this.getFollowedFids()]));
-        }
-
-        // Query casts for each target FID directly on the local node
-        for (const targetFid of targetFids) {
-          try {
-            const remoteCasts = await defaultNodeClient.getCastsByFid(targetFid, 10, targetNodeUrl);
-            for (const rc of remoteCasts) {
-              if (!rc.author) {
-                const author = await this.getUser(rc.fid, targetNodeUrl);
-                if (author) rc.author = author;
-              }
-              this.addCast(rc);
-            }
-          } catch {
-            // Node still syncing this FID, continue
-          }
-        }
-      } catch (err) {
-        console.warn('Error reading feed from local Snapchain node:', err);
-      }
-    }
-
-    // 2. Filter casts
-    let allCasts = Array.from(this.casts.values()).filter((c) => !c.parentCastId);
-
-    if (options?.fid) {
-      allCasts = allCasts.filter((c) => c.fid === options.fid);
-    }
-
-    if (options?.sourceFilter && options.sourceFilter !== 'all') {
-      allCasts = allCasts.filter(
-        (c) => c.clientSource?.toLowerCase() === options.sourceFilter?.toLowerCase()
+    if (sourceFilter && sourceFilter !== 'all') {
+      filtered = filtered.filter(
+        (c) => c.clientSource?.toLowerCase() === sourceFilter.toLowerCase()
       );
     }
 
     // Attach author profile to any cast missing it
-    for (const c of allCasts) {
+    for (const c of filtered) {
       if (!c.author && c.fid) {
         const u = this.users.get(c.fid);
         if (u) {
@@ -360,7 +319,187 @@ class FeedStore {
       }
     }
 
-    return allCasts.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+    // Strict reverse chronological order (newest timestamp first)
+    return filtered.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+  }
+
+  /**
+   * Get feed casts directly from the Snapchain read node & network.
+   * - If options.viewerFid is set and not global: fetches the latest casts from accounts followed by viewer.
+   * - If options.viewerFid is NOT set (or mode='global'): fetches the authentic real-time latest casts across the network.
+   */
+  public async getFeed(options?: {
+    limit?: number;
+    sourceFilter?: string;
+    fid?: number;
+    viewerFid?: number;
+    mode?: 'following' | 'global';
+    nodeUrl?: string;
+  }): Promise<FarcasterCast[]> {
+    const limit = options?.limit || 40;
+    const targetNodeUrl = options?.nodeUrl || 'http://127.0.0.1:3381';
+    const isGlobal = options?.mode === 'global' || (!options?.viewerFid && !options?.fid);
+
+    // CASE 1: Specific FID profile casts
+    if (options?.fid) {
+      const casts = await defaultNodeClient.getCastsByFid(options.fid, limit, targetNodeUrl);
+      for (const c of casts) {
+        if (!c.author) {
+          const author = await this.getUser(c.fid, targetNodeUrl);
+          if (author) c.author = author;
+        }
+        this.addCast(c);
+      }
+      return this.filterAndSortCasts(
+        Array.from(this.casts.values()).filter((c) => c.fid === options.fid),
+        options.sourceFilter,
+        limit
+      );
+    }
+
+    // CASE 2: Logged-in user Following Feed
+    if (options?.viewerFid && !isGlobal) {
+      const viewerFid = options.viewerFid;
+
+      // 1. Fetch real-time follows from network (local node + protocol directory fallback)
+      const { fids: remoteFids, users: remoteUsers } = await defaultNodeClient.getFollowsByFid(
+        viewerFid,
+        targetNodeUrl
+      );
+      for (const u of remoteUsers) {
+        this.registerUser(u);
+      }
+
+      // Merge with in-memory session follows
+      const sessionFollows = this.getFollowedFids(viewerFid);
+      const allFollowedFids = Array.from(new Set([...remoteFids, ...sessionFollows]));
+      this.setFollowedFids(viewerFid, allFollowedFids);
+
+      // If user follows people, fetch latest casts for followed accounts
+      if (allFollowedFids.length > 0) {
+        // Query up to 25 followed accounts in parallel
+        const targetAccounts = allFollowedFids.slice(0, 25);
+        await Promise.allSettled(
+          targetAccounts.map(async (fId) => {
+            try {
+              const userCasts = await defaultNodeClient.getCastsByFid(fId, 8, targetNodeUrl);
+              for (const c of userCasts) {
+                if (!c.author) {
+                  const author = await this.getUser(c.fid, targetNodeUrl);
+                  if (author) c.author = author;
+                }
+                this.addCast(c);
+              }
+            } catch {
+              // ignore
+            }
+          })
+        );
+
+        // Also fetch viewer's own latest casts so they see their posts
+        try {
+          const ownCasts = await defaultNodeClient.getCastsByFid(viewerFid, 6, targetNodeUrl);
+          for (const c of ownCasts) {
+            if (!c.author) {
+              const author = await this.getUser(viewerFid, targetNodeUrl);
+              if (author) c.author = author;
+            }
+            this.addCast(c);
+          }
+        } catch {
+          // ignore
+        }
+
+        const followedSet = new Set([...allFollowedFids, viewerFid]);
+        const feedCasts = Array.from(this.casts.values()).filter((c) => followedSet.has(c.fid));
+        return this.filterAndSortCasts(feedCasts, options?.sourceFilter, limit);
+      } else {
+        // User follows 0 accounts yet
+        return [];
+      }
+    }
+
+    // CASE 3: GLOBAL / NETWORK LATEST CASTS (Not logged in, or explicit global mode)
+    // 1. Check local Snapchain Read Node's live event stream
+    try {
+      const liveEvents = await defaultNodeClient.getLiveEventsCasts(50, targetNodeUrl);
+      for (const c of liveEvents) {
+        if (!c.author) {
+          const author = await this.getUser(c.fid, targetNodeUrl);
+          if (author) c.author = author;
+        }
+        this.addCast(c);
+      }
+    } catch {
+      // Local node offline or syncing
+    }
+
+    // 2. Discover active FIDs directly from local node if available
+    try {
+      const nodeFids = await defaultNodeClient.getFids(targetNodeUrl, 15);
+      if (nodeFids.length > 0) {
+        await Promise.allSettled(
+          nodeFids.slice(0, 10).map(async (nfid) => {
+            try {
+              const casts = await defaultNodeClient.getCastsByFid(nfid, 5, targetNodeUrl);
+              for (const c of casts) {
+                if (!c.author) {
+                  const author = await this.getUser(c.fid, targetNodeUrl);
+                  if (author) c.author = author;
+                }
+                this.addCast(c);
+              }
+            } catch {
+              // ignore
+            }
+          })
+        );
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Fetch latest casts across active Farcaster creators / network builders
+    const ACTIVE_NETWORK_CREATORS = [
+      3,    // dwr (Dan Romero - Farcaster co-founder)
+      2,    // v (Varun Srinivasan - Farcaster co-founder)
+      37,   // balajis (Balaji Srinivasan)
+      99,   // jessepollak (Jesse Pollak - Base founder)
+      5650, // vitalik.eth (Vitalik Buterin)
+      12,   // ted
+      557,  // pugson
+      680,  // woj
+      576,  // nonlinear.eth
+      1325, // cassie
+      194,  // wake
+      1214, // linda
+      347,  // greg
+      800,  // timdaub
+      4665, // britt
+      15983,// jacek ($DEGEN)
+      617,  // cameron
+      358,  // corbin.eth
+      539,  // ace
+    ];
+
+    await Promise.allSettled(
+      ACTIVE_NETWORK_CREATORS.map(async (fid) => {
+        try {
+          const userCasts = await defaultNodeClient.getCastsByFid(fid, 6, targetNodeUrl);
+          for (const c of userCasts) {
+            if (!c.author) {
+              const author = await this.getUser(c.fid, targetNodeUrl);
+              if (author) c.author = author;
+            }
+            this.addCast(c);
+          }
+        } catch {
+          // ignore
+        }
+      })
+    );
+
+    return this.filterAndSortCasts(Array.from(this.casts.values()), options?.sourceFilter, limit);
   }
 
   /**
@@ -400,24 +539,48 @@ class FeedStore {
   }
 
   /**
-   * Follow / Unfollow FID
+   * Follow / Unfollow FID (optionally scoped to a viewer FID)
    */
-  public toggleFollow(targetFid: number, isRemove = false): boolean {
+  public toggleFollow(targetFid: number, isRemove = false, viewerFid?: number): boolean {
+    if (viewerFid) {
+      if (!this.userFollows.has(viewerFid)) {
+        this.userFollows.set(viewerFid, new Set());
+      }
+      const set = this.userFollows.get(viewerFid)!;
+      if (isRemove) {
+        set.delete(targetFid);
+        return false;
+      } else {
+        set.add(targetFid);
+        return true;
+      }
+    }
+
     if (isRemove) {
-      this.followedFids.delete(targetFid);
+      this.defaultFollowedFids.delete(targetFid);
       return false;
     } else {
-      this.followedFids.add(targetFid);
+      this.defaultFollowedFids.add(targetFid);
       return true;
     }
   }
 
-  public isFollowing(targetFid: number): boolean {
-    return this.followedFids.has(targetFid);
+  public isFollowing(targetFid: number, viewerFid?: number): boolean {
+    if (viewerFid && this.userFollows.has(viewerFid)) {
+      return this.userFollows.get(viewerFid)!.has(targetFid);
+    }
+    return this.defaultFollowedFids.has(targetFid);
   }
 
-  public getFollowedFids(): number[] {
-    return Array.from(this.followedFids);
+  public getFollowedFids(viewerFid?: number): number[] {
+    if (viewerFid && this.userFollows.has(viewerFid)) {
+      return Array.from(this.userFollows.get(viewerFid)!);
+    }
+    return Array.from(this.defaultFollowedFids);
+  }
+
+  public setFollowedFids(viewerFid: number, fids: number[]): void {
+    this.userFollows.set(viewerFid, new Set(fids));
   }
 }
 

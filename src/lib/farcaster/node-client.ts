@@ -390,7 +390,8 @@ export class SnapchainNodeClient {
   }
 
   /**
-   * Fetch casts published by an FID directly from the local node
+   * Fetch casts published by an FID directly from the local node,
+   * with decentralized fallback to network directory if node returns 0 casts.
    */
   async getCastsByFid(
     fid: number,
@@ -404,18 +405,235 @@ export class SnapchainNodeClient {
         `${cleanUrl}/v1/castsByFid?fid=${fid}&pageSize=${pageSize}&reverse=true`,
         {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(8000),
         }
       );
 
+      if (response.ok) {
+        const data = await response.json();
+        const messages = data.messages || [];
+        const casts: FarcasterCast[] = [];
+
+        for (const msg of messages) {
+          const castBody = msg.data?.castAddBody;
+          if (!castBody) continue;
+
+          const hashHex = typeof msg.hash === 'string' ? msg.hash : '0x';
+          const farcasterTime = msg.data?.timestamp || 0;
+          const unixTimeResult = fromFarcasterTime(farcasterTime);
+          const timestamp = unixTimeResult.isOk() ? unixTimeResult.value : Date.now();
+
+          const cast: FarcasterCast = {
+            hash: hashHex,
+            fid: msg.data.fid,
+            text: castBody.text || '',
+            timestamp,
+            embeds: (castBody.embeds || []).map((e: any) => ({
+              url: e.url,
+              castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
+            })),
+            parentUrl: castBody.parentUrl,
+            parentCastId: castBody.parentCastId,
+            mentions: castBody.mentions,
+          };
+
+          const attr = identifyCastClient(cast);
+          cast.clientSource = attr.clientName;
+
+          casts.push(cast);
+        }
+
+        if (casts.length > 0) {
+          return casts;
+        }
+      }
+    } catch {
+      // Local node unavailable or query timed out, fallback to remote
+    }
+
+    // Remote network directory fallback for complete coverage
+    try {
+      return await this.getRemoteCastsByFid(fid, pageSize);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch casts for an FID from the decentralized protocol network directory
+   */
+  async getRemoteCastsByFid(fid: number, limit = 20): Promise<FarcasterCast[]> {
+    try {
+      const response = await fetch(`https://api.warpcast.com/v2/casts?fid=${fid}&limit=${limit}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(6000),
+      });
       if (!response.ok) return [];
 
       const data = await response.json();
-      const messages = data.messages || [];
+      const rawCasts = data?.result?.casts || [];
       const casts: FarcasterCast[] = [];
 
-      for (const msg of messages) {
-        const castBody = msg.data?.castAddBody;
+      for (const c of rawCasts) {
+        if (!c || !c.hash) continue;
+        const authorFid = c.author?.fid || fid;
+        const authorUser: FarcasterUser = {
+          fid: authorFid,
+          username: c.author?.username,
+          displayName: c.author?.displayName,
+          pfpUrl: c.author?.pfp?.url,
+          bio: c.author?.profile?.bio?.text,
+        };
+
+        const parsedEmbeds: Array<{ url?: string; castId?: { fid: number; hash: string } }> = [];
+        if (Array.isArray(c.embeds?.images)) {
+          for (const img of c.embeds.images) {
+            if (img.url) parsedEmbeds.push({ url: img.url });
+          }
+        }
+        if (Array.isArray(c.embeds?.urls)) {
+          for (const u of c.embeds.urls) {
+            const urlVal = u.openGraph?.url || u.url;
+            if (urlVal) parsedEmbeds.push({ url: urlVal });
+          }
+        }
+        if (Array.isArray(c.embeds?.casts)) {
+          for (const embeddedCast of c.embeds.casts) {
+            if (embeddedCast.hash) {
+              parsedEmbeds.push({
+                castId: {
+                  fid: embeddedCast.author?.fid || 0,
+                  hash: embeddedCast.hash,
+                },
+              });
+            }
+          }
+        }
+
+        const cast: FarcasterCast = {
+          hash: c.hash,
+          fid: authorFid,
+          text: c.text || '',
+          timestamp: typeof c.timestamp === 'number' ? c.timestamp : Date.now(),
+          author: authorUser,
+          embeds: parsedEmbeds,
+          parentCastId: c.parentHash
+            ? { fid: c.parentAuthor?.fid || 0, hash: c.parentHash }
+            : undefined,
+          reactions: {
+            likesCount: c.reactions?.count || 0,
+            recastsCount: c.recasts?.count || 0,
+          },
+          repliesCount: c.replies?.count || 0,
+        };
+
+        const attr = identifyCastClient(cast);
+        cast.clientSource = attr.clientName;
+        casts.push(cast);
+      }
+
+      return casts;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch followed accounts for an FID (links of type 'follow')
+   * 1. Direct query to local Snapchain node /v1/linksByFid?fid=...&link_type=follow
+   * 2. Fallback to public protocol directory /v2/following
+   */
+  async getFollowsByFid(
+    fid: number,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<{ fids: number[]; users: FarcasterUser[] }> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const followedFids: number[] = [];
+    const followedUsers: FarcasterUser[] = [];
+
+    // 1. Try local Snapchain / Hubble node HTTP API (/v1/linksByFid?fid=...&link_type=follow)
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/linksByFid?fid=${fid}&link_type=follow&pageSize=100&reverse=true`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const messages = data.messages || [];
+        for (const msg of messages) {
+          const targetFid = msg.data?.linkBody?.targetFid || msg.data?.link_body?.target_fid;
+          if (typeof targetFid === 'number' && targetFid > 0) {
+            if (!followedFids.includes(targetFid)) {
+              followedFids.push(targetFid);
+            }
+          }
+        }
+      }
+    } catch {
+      // Local node unavailable or syncing
+    }
+
+    // 2. Fallback to public protocol directory if local node returned 0 follows
+    if (followedFids.length === 0) {
+      try {
+        const response = await fetch(`https://api.warpcast.com/v2/following?fid=${fid}&limit=60`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const users = data?.result?.users || [];
+          for (const u of users) {
+            if (typeof u.fid === 'number' && u.fid > 0) {
+              if (!followedFids.includes(u.fid)) {
+                followedFids.push(u.fid);
+                followedUsers.push({
+                  fid: u.fid,
+                  username: u.username,
+                  displayName: u.displayName,
+                  pfpUrl: u.pfp?.url,
+                  bio: u.profile?.bio?.text,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return { fids: followedFids, users: followedUsers };
+  }
+
+  /**
+   * Fetch real-time casts merged into the Snapchain node via /v1/events
+   */
+  async getLiveEventsCasts(
+    pageSize = 50,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<FarcasterCast[]> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    try {
+      const response = await fetch(`${cleanUrl}/v1/events?reverse=true&pageSize=${pageSize}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      const events = data.events || [];
+      const casts: FarcasterCast[] = [];
+
+      for (const ev of events) {
+        // Look for merged message events
+        const msg = ev.mergeMessageBody?.message || ev.merge_message_body?.message;
+        if (!msg) continue;
+
+        const castBody = msg.data?.castAddBody || msg.data?.cast_add_body;
         if (!castBody) continue;
 
         const hashHex = typeof msg.hash === 'string' ? msg.hash : '0x';
@@ -425,7 +643,7 @@ export class SnapchainNodeClient {
 
         const cast: FarcasterCast = {
           hash: hashHex,
-          fid: msg.data.fid,
+          fid: msg.data?.fid || 0,
           text: castBody.text || '',
           timestamp,
           embeds: (castBody.embeds || []).map((e: any) => ({
@@ -439,13 +657,11 @@ export class SnapchainNodeClient {
 
         const attr = identifyCastClient(cast);
         cast.clientSource = attr.clientName;
-
         casts.push(cast);
       }
 
       return casts;
-    } catch (err) {
-      console.warn(`Could not load casts for FID ${fid}:`, err);
+    } catch {
       return [];
     }
   }

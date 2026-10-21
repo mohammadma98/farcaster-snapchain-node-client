@@ -118,6 +118,7 @@ export function FarcasterClient() {
   const [casts, setCasts] = useState<FarcasterCast[]>([]);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [feedMode, setFeedMode] = useState<'following' | 'global'>('global');
 
   // Composer State
   const [composeText, setComposeText] = useState('');
@@ -167,9 +168,52 @@ export function FarcasterClient() {
     }
   };
 
+  // Fetch accounts followed by user
+  const fetchFollows = useCallback(async (fid: number, targetNode = nodeUrl) => {
+    try {
+      const res = await fetch(`/api/links?fid=${fid}&nodeUrl=${encodeURIComponent(targetNode)}`);
+      const data = await res.json();
+      if (Array.isArray(data.following)) {
+        setFollowedFids(new Set(data.following));
+      }
+    } catch {
+      // ignore
+    }
+  }, [nodeUrl]);
+
+  // 3. Fetch Feed (Following feed if logged in, Global real-time network feed if not logged in)
+  const fetchFeed = useCallback(
+    async (
+      filter = sourceFilter,
+      mode = feedMode,
+      explicitViewerFid = session?.fid
+    ) => {
+      setIsLoadingFeed(true);
+      try {
+        const effectiveMode = explicitViewerFid ? mode : 'global';
+        const viewerParam =
+          explicitViewerFid && effectiveMode === 'following'
+            ? `&viewerFid=${explicitViewerFid}`
+            : '';
+        const modeParam = `&mode=${effectiveMode}`;
+        const url = `/api/feed?source=${encodeURIComponent(filter)}${viewerParam}${modeParam}&nodeUrl=${encodeURIComponent(nodeUrl)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.casts) {
+          setCasts(data.casts);
+        }
+      } catch (err) {
+        console.error('Error fetching feed:', err);
+      } finally {
+        setIsLoadingFeed(false);
+      }
+    },
+    [nodeUrl, sourceFilter, session?.fid, feedMode]
+  );
+
   // 1. Initial Load & Restore Session
   useEffect(() => {
-    // Restore session from localStorage if exists
+    let initialViewerFid: number | undefined;
     try {
       const saved = localStorage.getItem('farcaster_session');
       const savedNode = localStorage.getItem('farcaster_node_url');
@@ -179,7 +223,11 @@ export function FarcasterClient() {
       if (saved) {
         const parsed: UserSession = JSON.parse(saved);
         setSession(parsed);
-        // Refresh session profile in background to ensure authentic username & avatar
+        setFeedMode('following');
+        initialViewerFid = parsed.fid;
+        fetchFollows(parsed.fid, savedNode || nodeUrl);
+
+        // Refresh session profile in background
         fetch(`/api/users/${parsed.fid}?nodeUrl=${encodeURIComponent(savedNode || nodeUrl)}`)
           .then((r) => r.json())
           .then((data) => {
@@ -202,13 +250,18 @@ export function FarcasterClient() {
     }
 
     pingNode();
-    fetchFeed();
+    fetchFeed(
+      sourceFilter,
+      initialViewerFid ? 'following' : 'global',
+      initialViewerFid
+    );
     fetchSuggestedUsers();
   }, []);
 
   // Save session when updated
   const handleLoginSuccess = (userSession: UserSession) => {
     setSession(userSession);
+    setFeedMode('following');
     setIsAuthModalOpen(false);
     try {
       localStorage.setItem('farcaster_session', JSON.stringify(userSession));
@@ -216,17 +269,20 @@ export function FarcasterClient() {
       // ignore
     }
     showToast(`Logged in as @${userSession.username} (FID ${userSession.fid})`);
-    fetchFeed();
+    fetchFollows(userSession.fid);
+    fetchFeed(sourceFilter, 'following', userSession.fid);
   };
 
   const handleLogout = () => {
     setSession(null);
+    setFeedMode('global');
     try {
       localStorage.removeItem('farcaster_session');
     } catch {
       // ignore
     }
     showToast('Logged out of client');
+    fetchFeed(sourceFilter, 'global', undefined);
   };
 
   // 2. Node Health Check
@@ -244,23 +300,6 @@ export function FarcasterClient() {
       setIsPinging(false);
     }
   };
-
-  // 3. Fetch Feed
-  const fetchFeed = useCallback(async (filter = sourceFilter) => {
-    setIsLoadingFeed(true);
-    try {
-      const url = `/api/feed?source=${encodeURIComponent(filter)}&nodeUrl=${encodeURIComponent(nodeUrl)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.casts) {
-        setCasts(data.casts);
-      }
-    } catch (err) {
-      console.error('Error fetching feed:', err);
-    } finally {
-      setIsLoadingFeed(false);
-    }
-  }, [nodeUrl, sourceFilter]);
 
   // 4. Fetch Suggested Users (Strictly balajis and mohammad98)
   const fetchSuggestedUsers = async () => {
@@ -545,6 +584,10 @@ export function FarcasterClient() {
           nodeUrl,
         }),
       });
+
+      if (feedMode === 'following' && session?.fid) {
+        fetchFeed(sourceFilter, 'following', session.fid);
+      }
     } catch {
       // optimistic
     }
@@ -770,6 +813,90 @@ export function FarcasterClient() {
             {/* VIEW 1: HOME FEED */}
             {activeTab === 'feed' && (
               <div className="space-y-4">
+                {/* Feed Mode Switcher Header */}
+                {session ? (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <button
+                        onClick={() => {
+                          setFeedMode('following');
+                          fetchFeed(sourceFilter, 'following', session.fid);
+                        }}
+                        className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                          feedMode === 'following'
+                            ? 'bg-purple-700 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                        <span>Following ({followedFids.size})</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFeedMode('global');
+                          fetchFeed(sourceFilter, 'global', session.fid);
+                        }}
+                        className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                          feedMode === 'global'
+                            ? 'bg-purple-700 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                        <span>Global Network</span>
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => fetchFeed(sourceFilter, feedMode, session.fid)}
+                      title="Refresh Feed"
+                      className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors shrink-0"
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
+                      />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">
+                            Latest Network Casts
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
+                            Live Stream
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          Real-time global posts across the decentralized Farcaster network
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setIsAuthModalOpen(true)}
+                        className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+                      >
+                        <Key className="h-3.5 w-3.5" />
+                        <span>Log In for Following Feed</span>
+                      </button>
+                      <button
+                        onClick={() => fetchFeed(sourceFilter, 'global', undefined)}
+                        title="Refresh Global Feed"
+                        className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors"
+                      >
+                        <RefreshCw
+                          className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Client Source Filters */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center gap-2 overflow-x-auto scrollbar-none">
                   <span className="text-xs font-bold text-slate-400 pl-1 uppercase tracking-wider">Source:</span>
@@ -784,7 +911,7 @@ export function FarcasterClient() {
                       key={f.id}
                       onClick={() => {
                         setSourceFilter(f.id);
-                        fetchFeed(f.id);
+                        fetchFeed(f.id, feedMode, session?.fid);
                       }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
                         sourceFilter === f.id
@@ -868,27 +995,54 @@ export function FarcasterClient() {
                 {isLoadingFeed ? (
                   <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
                     <RefreshCw className="h-6 w-6 text-purple-600 animate-spin mx-auto" />
-                    <p className="text-xs text-slate-500 font-medium">Syncing feed from Snapchain...</p>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {feedMode === 'following' && session
+                        ? 'Fetching latest casts from creators you follow...'
+                        : 'Syncing latest network casts from Snapchain...'}
+                    </p>
                   </div>
                 ) : casts.length === 0 ? (
                   <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
                     <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 mb-1">
-                      <Layers className="h-6 w-6" />
+                      {feedMode === 'following' && session ? (
+                        <UserPlus className="h-6 w-6" />
+                      ) : (
+                        <Layers className="h-6 w-6" />
+                      )}
                     </div>
-                    <h3 className="font-bold text-sm text-slate-800">No Casts on Local Node Yet</h3>
+                    <h3 className="font-bold text-sm text-slate-800">
+                      {feedMode === 'following' && session
+                        ? 'No Posts in Your Following Feed Yet'
+                        : 'No Casts Found'}
+                    </h3>
                     <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                      Connected to standalone Snapchain Read Node at{' '}
-                      <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-purple-700">{nodeUrl}</code>.
-                      If your node is syncing initial snapshot blocks, posts will appear as shard blocks finalize.
-                      You can publish a new cast right now to post directly into the local mempool!
+                      {feedMode === 'following' && session
+                        ? followedFids.size === 0
+                          ? "You are not following anyone yet. Discover and follow active builders from the 'Who to Follow' section, or switch to the Global Network Feed!"
+                          : "The creators you follow have not posted recently or their posts are still syncing. Switch to the Global Network Feed to see what's happening right now."
+                        : `Connected to Snapchain Read Node at ${nodeUrl}. If your node is syncing initial blocks, posts will stream in automatically.`}
                     </p>
-                    <button
-                      onClick={() => fetchFeed()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-purple-700 text-white hover:bg-purple-800 transition-colors shadow-xs"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Refresh Local Node Feed
-                    </button>
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      {feedMode === 'following' && session && (
+                        <button
+                          onClick={() => {
+                            setFeedMode('global');
+                            fetchFeed(sourceFilter, 'global', session.fid);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-purple-700 text-white hover:bg-purple-800 transition-colors shadow-xs"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                          <span>View Global Network Feed</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => fetchFeed(sourceFilter, feedMode, session?.fid)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        <span>Refresh Feed</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
