@@ -252,9 +252,103 @@ if limits and 'ulimits:' in content:
 fi
 
 # ------------------------------------------------------------------------------
-# 5. RAM-Assisted Concurrent Chunk Streaming Pipeline
+# 5. Detached RAM-Assisted Concurrent Chunk Streaming Pipeline (SSH-Independent)
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[3/4] Evaluating Database State & Initializing Snapshot Pipeline...${NC}"
+
+mkdir -p "${SNAPCHAIN_DIR}/.rocks"
+
+# Check if all shards (0, 1, 2) are already fully materialized on disk
+ALL_SHARDS_DONE=true
+for s in 0 1 2; do
+    s_dir="${SNAPCHAIN_DIR}/.rocks/shard-${s}"
+    s_bytes=$(du -sb "$s_dir" 2>/dev/null | awk '{print $1}' || echo 0)
+    if [ "$s" -eq 0 ] && [ "$s_bytes" -le 10737418240 ]; then
+        ALL_SHARDS_DONE=false
+    elif [ "$s" -ne 0 ] && [ "$s_bytes" -le 107374182400 ]; then
+        ALL_SHARDS_DONE=false
+    fi
+done
+
+if [ "$ALL_SHARDS_DONE" == "true" ]; then
+    echo -e "  ${GREEN}✓ All Snapshot Shards (0, 1, 2) already materialized on disk. Skipping initial sync.${NC}"
+    sed -i 's/load_db_from_snapshot=true/load_db_from_snapshot=false/g' docker-compose.yml 2>/dev/null || true
+    echo -e "  ${GREEN}✓ Database state synchronized. Ready for container launch.${NC}"
+else
+    # Check if a detached background worker is already running
+    WORKER_PID_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.pid"
+    WORKER_STATUS_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.status"
+    WORKER_DONE_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.done"
+    WORKER_LOG_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.log"
+
+    WORKER_PID=$(cat "$WORKER_PID_FILE" 2>/dev/null || echo "")
+    IS_RUNNING=false
+    if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+        IS_RUNNING=true
+    fi
+
+    if [ "$IS_RUNNING" == "true" ]; then
+        echo -e "  ${GREEN}✓ Active Background Snapshot Pipeline detected (PID: ${WORKER_PID}).${NC}"
+        echo -e "    ${CYAN}Notice: The pipeline is running in a detached background worker independent of this SSH session.${NC}"
+        echo -e "    ${CYAN}Tip: You can safely detach anytime with Ctrl+C; the download will keep running.${NC}\n"
+    else
+        echo -e "  • Starting Detached RAM-Assisted Concurrent Streaming Pipeline..."
+        echo -e "    ${CYAN}Notice: Worker runs as an independent daemon immune to SSH dropouts or terminal closure.${NC}"
+        echo -e "    ${CYAN}Chunks are streamed through RAM (/dev/shm) directly into RocksDB (zero disk waste).${NC}\n"
+
+        # Generate the self-contained detached worker daemon script
+        cat <<'WORKER_SCRIPT_EOF' > "${SNAPCHAIN_DIR}/.snapshot_worker.sh"
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Ignore SIGHUP so closing the SSH session never interrupts the pipeline
+trap '' HUP
+
+SNAPCHAIN_DIR="${1:-${HOME}/snapchain}"
+STATUS_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.status"
+DONE_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.done"
+PID_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.pid"
+LOG_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.log"
+
+# ANSI Colors
+BOLD='\033[1m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+format_bytes() {
+    local b=${1:-0}
+    if ! [[ "$b" =~ ^[0-9]+$ ]]; then b=0; fi
+    if [ "$b" -ge 1073741824 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.2f GB", b / 1073741824}'
+    elif [ "$b" -ge 1048576 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.1f MB", b / 1048576}'
+    elif [ "$b" -ge 1024 ]; then
+        awk -v b="$b" 'BEGIN {printf "%.1f KB", b / 1024}'
+    else
+        echo "${b} B"
+    fi
+}
+
+format_speed() {
+    local bps=${1:-0}
+    if ! [[ "$bps" =~ ^[0-9]+$ ]]; then bps=0; fi
+    if [ "$bps" -ge 1048576 ]; then
+        awk -v b="$bps" 'BEGIN {printf "%.2f MB/s", b / 1048576}'
+    elif [ "$bps" -ge 1024 ]; then
+        awk -v b="$bps" 'BEGIN {printf "%.1f KB/s", b / 1024}'
+    else
+        echo "${bps} B/s"
+    fi
+}
+
+update_status() {
+    local msg="$1"
+    echo -e "$msg" > "${STATUS_FILE}.tmp" && mv -f "${STATUS_FILE}.tmp" "$STATUS_FILE"
+}
 
 R2_PUBLIC_BASE="https://pub-d352dd8819104a778e20d08888c5a661.r2.dev"
 NETWORK_NAME="FARCASTER_NETWORK_MAINNET"
@@ -263,20 +357,23 @@ NUM_SHARDS=${#SHARDS[@]}
 
 mkdir -p "${SNAPCHAIN_DIR}/.rocks"
 
-# Clean signal trap for background downloads & FIFOs
 PIPE_FIFO=""
 TAR_PID=""
 BUFFER_DIR=""
 declare -A DOWNLOAD_PIDS=()
-trap 'echo -e "\n${YELLOW}[!] Interrupted by user. Cleaning up pipeline resources...${NC}"; exec 3>&- 2>/dev/null || true; [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO"; for p in "${DOWNLOAD_PIDS[@]}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true; done; [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true; [ -n "$BUFFER_DIR" ] && rm -rf "$BUFFER_DIR" 2>/dev/null || true; exit 1' INT TERM
 
-echo -e "  • Starting RAM-Assisted Concurrent Chunk Streaming Pipeline..."
-echo -e "    ${CYAN}Notice: Chunks are streamed through RAM (/dev/shm) directly into RocksDB.${NC}"
-echo -e "    ${CYAN}Zero full archives or intermediate tar files are stored on disk (saves ~800 GB).${NC}\n"
+cleanup_resources() {
+    exec 3>&- 2>/dev/null || true
+    [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO" 2>/dev/null || true
+    for p in "${DOWNLOAD_PIDS[@]}"; do
+        [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
+    done
+    [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true
+    [ -n "$BUFFER_DIR" ] && rm -rf "$BUFFER_DIR" 2>/dev/null || true
+}
+trap cleanup_resources INT TERM
 
 for SHARD_ID in "${SHARDS[@]}"; do
-    echo -e "${BLUE}${BOLD}--- Synchronizing Shard [${SHARD_ID}/${NUM_SHARDS}] State Snapshot ---${NC}"
-
     SHARD_DIR="${SNAPCHAIN_DIR}/.rocks/shard-${SHARD_ID}"
     SHARD_BYTES=0
     if [ -d "$SHARD_DIR" ]; then
@@ -285,75 +382,56 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
     # Check if this specific shard is already bootstrapped (Shard 0: >10GB, Shards 1&2: >100GB)
     if [ "$SHARD_ID" -eq 0 ] && [ "$SHARD_BYTES" -gt 10737418240 ]; then
-        echo -e "  ${GREEN}✓ Shard 0 already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}\n"
+        update_status "  ${GREEN}✓ Shard 0 already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}"
         continue
     elif [ "$SHARD_ID" -ne 0 ] && [ "$SHARD_BYTES" -gt 107374182400 ]; then
-        echo -e "  ${GREEN}✓ Shard ${SHARD_ID} already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}\n"
+        update_status "  ${GREEN}✓ Shard ${SHARD_ID} already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}"
         continue
     elif [ "$SHARD_BYTES" -gt 0 ]; then
-        echo -e "  ${YELLOW}Notice: Cleaning up incomplete Shard ${SHARD_ID} state ($(format_bytes "$SHARD_BYTES"))...${NC}"
+        update_status "  ${YELLOW}Notice: Cleaning up incomplete Shard ${SHARD_ID} state ($(format_bytes "$SHARD_BYTES"))...${NC}"
         rm -rf "$SHARD_DIR"
     fi
 
     SHARD_META_URL="${R2_PUBLIC_BASE}/${NETWORK_NAME}/${SHARD_ID}/latest.json"
-    
     META_DATA=$(curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$SHARD_META_URL" 2>/dev/null || echo "")
     if [ -z "$META_DATA" ]; then
-        echo -e "${RED}[ERROR] Failed to fetch snapshot manifest for Shard ${SHARD_ID}.${NC}"
-        echo -e "Falling back to standard in-container bootstrap..."
-        break
+        echo "[ERROR] Failed to fetch snapshot manifest for Shard ${SHARD_ID}" >> "$LOG_FILE"
+        echo "ERROR" > "$DONE_FILE"
+        exit 1
     fi
 
     KEY_BASE=$(python3 -c "import json; print(json.loads('''$META_DATA''')['key_base'])" 2>/dev/null || echo "")
     TOTAL_CHUNKS=$(python3 -c "import json; print(len(json.loads('''$META_DATA''')['chunks']))" 2>/dev/null || echo 0)
 
     if [ "$TOTAL_CHUNKS" -eq 0 ] || [ -z "$KEY_BASE" ]; then
-        echo -e "${YELLOW}Warning: Manifest empty for Shard ${SHARD_ID}. Proceeding...${NC}"
         continue
     fi
 
-    echo -e "  - Total Chunks:   ${BOLD}${TOTAL_CHUNKS}${NC} (~$(format_bytes $(( TOTAL_CHUNKS * 70209256 ))))"
-    echo -e "  - Target Shard:   ${BOLD}${SNAPCHAIN_DIR}/.rocks/shard-${SHARD_ID}${NC}"
-
-    # Evaluate available RAM in /dev/shm (RAM Buffer)
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
-    
-    # Safety reserve: Keep at least 350 MB free in /dev/shm for OS safety headroom
     SAFETY_RESERVE_MB=350
 
     if [ "${SHM_AVAIL_MB:-0}" -ge $(( SAFETY_RESERVE_MB + 150 )) ]; then
         USABLE_SHM_MB=$(( SHM_AVAIL_MB - SAFETY_RESERVE_MB ))
-        # Each compressed chunk is ~70 MB. Allow up to USABLE_SHM_MB / 75 chunks buffered in RAM:
         MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 75 ))
-        if [ "$MAX_BUFFERED_CHUNKS" -lt 2 ]; then
-            MAX_BUFFERED_CHUNKS=2
-        fi
+        [ "$MAX_BUFFERED_CHUNKS" -lt 2 ] && MAX_BUFFERED_CHUNKS=2
         CONCURRENT_DOWNLOADS=3
-        echo -e "  - RAM Buffer:     ${GREEN}Dynamic in-memory pool (/dev/shm, ${SHM_AVAIL_MB} MB free, queue up to ${MAX_BUFFERED_CHUNKS} chunks)${NC}"
-        echo -e "  - Concurrency:    ${CYAN}${CONCURRENT_DOWNLOADS} parallel streams with continuous lookahead prefetch${NC}"
         mkdir -p "$BUFFER_DIR"
-        USE_RAM=true
     else
         BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
         MAX_BUFFERED_CHUNKS=3
         CONCURRENT_DOWNLOADS=2
-        echo -e "  - RAM Buffer:     ${YELLOW}Constrained RAM; buffering on disk (${BUFFER_DIR})${NC}"
         mkdir -p "$BUFFER_DIR"
-        USE_RAM=false
     fi
 
-    # Named Pipe for streaming uncompressed tar bytes into destination
     PIPE_FIFO="/tmp/snapchain_pipe_${SHARD_ID}_$$.fifo"
     rm -f "$PIPE_FIFO"
     mkfifo "$PIPE_FIFO"
 
-    # Background tar worker reading from FIFO into base .rocks directory (archives embed shard-X/ path)
     tar -xf "$PIPE_FIFO" -C "${SNAPCHAIN_DIR}/.rocks" &
     TAR_PID=$!
     TAR_COMPLETED=false
 
-    # Open persistent write descriptor 3 on FIFO. Keeps pipe open continuously across all chunk writes!
     exec 3> "$PIPE_FIFO"
 
     CHUNK_LIST=$(python3 -c "import json; print(' '.join(json.loads('''$META_DATA''')['chunks']))")
@@ -362,19 +440,16 @@ for SHARD_ID in "${SHARDS[@]}"; do
     START_TIME=$(date +%s)
     BYTES_PROCESSED=0
 
-    # Dynamic Asynchronous Prefetch Queue Manager
     declare -A DOWNLOAD_PIDS=()
     NEXT_DOWNLOAD_IDX=0
 
     refill_download_queue() {
         local curr_extract_idx=$1
         while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
-            # Enforce max RAM buffer capacity (Backpressure)
             if [ $(( NEXT_DOWNLOAD_IDX - curr_extract_idx )) -ge "$MAX_BUFFERED_CHUNKS" ]; then
                 break
             fi
 
-            # Enforce max concurrent downloads
             local active=0
             for p in "${DOWNLOAD_PIDS[@]}"; do
                 if kill -0 "$p" 2>/dev/null; then
@@ -394,58 +469,51 @@ for SHARD_ID in "${SHARDS[@]}"; do
         done
     }
 
-    # Seed the initial download pipeline
     refill_download_queue 0
 
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
         CURRENT_CHUNK="${CHUNK_ARRAY[i]}"
         CURRENT_FILE="${BUFFER_DIR}/${CURRENT_CHUNK}"
 
-        # Refill download pipeline before waiting
         refill_download_queue "$i"
 
-        # Wait for the current chunk to finish downloading if still in progress
         if [ -n "${DOWNLOAD_PIDS[$i]:-}" ]; then
             wait "${DOWNLOAD_PIDS[$i]}" || {
-                echo -e "\n${RED}[ERROR] Download failed for chunk ${CURRENT_CHUNK}.${NC}"
-                exec 3>&- 2>/dev/null || true
-                kill -9 "$TAR_PID" 2>/dev/null || true
+                echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
+                echo "ERROR" > "$DONE_FILE"
+                cleanup_resources
                 exit 1
             }
             unset DOWNLOAD_PIDS["$i"]
         fi
 
-        # Immediately queue next chunk downloads to keep network at 100% saturation
         refill_download_queue "$i"
 
-        # Decompress current chunk from RAM directly into descriptor 3 (Pipe stays open)
         if [ -s "$CURRENT_FILE" ]; then
             CHUNK_SIZE=$(stat -c%s "$CURRENT_FILE" 2>/dev/null || echo 70209256)
             gzip -dc "$CURRENT_FILE" >&3
-            # Instantly purge compressed chunk from RAM to reclaim memory
             rm -f "$CURRENT_FILE"
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
         else
-            echo -e "\n${RED}[ERROR] Chunk file missing or empty: ${CURRENT_CHUNK}.${NC}"
-            exec 3>&- 2>/dev/null || true
-            kill -9 "$TAR_PID" 2>/dev/null || true
+            echo "[ERROR] Chunk file missing or empty: ${CURRENT_CHUNK}" >> "$LOG_FILE"
+            echo "ERROR" > "$DONE_FILE"
+            cleanup_resources
             exit 1
         fi
 
-        # Check tar health (distinguish between successful archive completion and real crashes)
         if ! kill -0 "$TAR_PID" 2>/dev/null; then
             wait "$TAR_PID" 2>/dev/null
             TAR_STATUS=$?
             if [ "$TAR_STATUS" -eq 0 ]; then
                 TAR_COMPLETED=true
             else
-                echo -e "\n${RED}[ERROR] tar extractor failed with exit code ${TAR_STATUS} for Shard ${SHARD_ID}.${NC}"
-                exec 3>&- 2>/dev/null || true
+                echo "[ERROR] tar extractor failed with exit code ${TAR_STATUS} for Shard ${SHARD_ID}" >> "$LOG_FILE"
+                echo "ERROR" > "$DONE_FILE"
+                cleanup_resources
                 exit 1
             fi
         fi
 
-        # Live Progress & Throughput Display
         NOW=$(date +%s)
         ELAPSED=$(( NOW - START_TIME ))
         if [ "$ELAPSED" -gt 0 ]; then
@@ -456,46 +524,90 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
         DONE_COUNT=$(( i + 1 ))
         PERCENT=$(( DONE_COUNT * 100 / TOTAL_CHUNKS ))
-
-        # Measure active RAM chunks
         RAM_BUFFERED=$(ls -1 "$BUFFER_DIR" 2>/dev/null | wc -l || echo 0)
 
-        printf "\r  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Queue: %2d chunks | Elapsed: %02dm:%02ds" \
+        PROGRESS_MSG=$(printf "  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Queue: %2d chunks | Elapsed: %02dm:%02ds" \
             "$SHARD_ID" "$NUM_SHARDS" "$PERCENT" "$DONE_COUNT" "$TOTAL_CHUNKS" \
             "$(format_bytes "$BYTES_PROCESSED")" "$(format_speed "$CURR_SPEED")" \
             "$RAM_BUFFERED" \
-            $(( ELAPSED / 60 )) $(( ELAPSED % 60 ))
+            $(( ELAPSED / 60 )) $(( ELAPSED % 60 )))
 
-        # If tar cleanly completed end-of-archive marker, we can conclude this shard
+        update_status "$PROGRESS_MSG"
+
         if [ "$TAR_COMPLETED" == "true" ]; then
             break
         fi
     done
 
-    # Cleanup remaining download jobs if tar finished early
     for p in "${DOWNLOAD_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
 
-    # Close FIFO write descriptor so tar sees EOF cleanly if still running
     exec 3>&- 2>/dev/null || true
     if [ "$TAR_COMPLETED" != "true" ]; then
         wait "$TAR_PID" 2>/dev/null
         TAR_STATUS=$?
         if [ "$TAR_STATUS" -ne 0 ]; then
-            echo -e "\n${RED}[ERROR] tar extractor completed with non-zero exit code: ${TAR_STATUS}.${NC}"
+            echo "[ERROR] tar extractor completed with non-zero exit code: ${TAR_STATUS}" >> "$LOG_FILE"
+            echo "ERROR" > "$DONE_FILE"
+            cleanup_resources
             exit 1
         fi
     fi
-    rm -f "$PIPE_FIFO"
-    rm -rf "$BUFFER_DIR"
+    rm -f "$PIPE_FIFO" 2>/dev/null || true
+    rm -rf "$BUFFER_DIR" 2>/dev/null || true
 
-    echo -e "\n  ${GREEN}✓ Shard [${SHARD_ID}/${NUM_SHARDS}] materialized successfully!${NC}\n"
+    update_status "  ${GREEN}✓ Shard [${SHARD_ID}/${NUM_SHARDS}] materialized successfully!${NC}"
 done
 
-# Switch entrypoint in docker-compose.yml to skip re-download
-sed -i 's/load_db_from_snapshot=true/load_db_from_snapshot=false/g' docker-compose.yml 2>/dev/null || true
-echo -e "  ${GREEN}✓ Database state synchronized. Ready for container launch.${NC}"
+echo "SUCCESS" > "$DONE_FILE"
+rm -f "$PID_FILE" 2>/dev/null || true
+WORKER_SCRIPT_EOF
+
+        chmod +x "${SNAPCHAIN_DIR}/.snapshot_worker.sh"
+        rm -f "$WORKER_DONE_FILE"
+
+        nohup bash "${SNAPCHAIN_DIR}/.snapshot_worker.sh" "$SNAPCHAIN_DIR" > "$WORKER_LOG_FILE" 2>&1 &
+        WORKER_PID=$!
+        disown $WORKER_PID 2>/dev/null || true
+        echo "$WORKER_PID" > "$WORKER_PID_FILE"
+
+        echo -e "  ${GREEN}✓ Background worker started (PID: ${WORKER_PID}). Attaching to live progress monitor...${NC}"
+        echo -e "    ${CYAN}Tip: Press Ctrl+C at any time to detach without interrupting the background sync.${NC}\n"
+    fi
+
+    # Set non-killing trap for interactive monitor: detaching does not kill worker
+    trap 'echo -e "\n\n${YELLOW}[i] Detached from monitor. Snapshot worker (PID: ${WORKER_PID}) continues running in the background.${NC}"; echo -e "${CYAN}To re-attach anytime, simply run Step (1) again.${NC}\n"; exit 0' INT TERM
+
+    LAST_STATUS=""
+    while kill -0 "$WORKER_PID" 2>/dev/null; do
+        if [ -f "$WORKER_STATUS_FILE" ]; then
+            STATUS_LINE=$(cat "$WORKER_STATUS_FILE" 2>/dev/null || echo "")
+            if [ -n "$STATUS_LINE" ] && [ "$STATUS_LINE" != "$LAST_STATUS" ]; then
+                printf "\r%b" "$STATUS_LINE"
+                LAST_STATUS="$STATUS_LINE"
+            fi
+        fi
+        sleep 0.5
+    done
+
+    # Reset trap
+    trap - INT TERM
+    echo ""
+
+    if [ -f "$WORKER_DONE_FILE" ] && grep -q "SUCCESS" "$WORKER_DONE_FILE"; then
+        echo -e "\n  ${GREEN}✓ State Snapshot Sync completed successfully!${NC}"
+        sed -i 's/load_db_from_snapshot=true/load_db_from_snapshot=false/g' docker-compose.yml 2>/dev/null || true
+        echo -e "  ${GREEN}✓ Database state synchronized. Ready for container launch.${NC}"
+    else
+        echo -e "\n  ${RED}[ERROR] Snapshot worker exited unexpectedly or failed.${NC}"
+        if [ -f "$WORKER_LOG_FILE" ]; then
+            echo -e "${YELLOW}Latest worker log output:${NC}"
+            tail -n 25 "$WORKER_LOG_FILE"
+        fi
+        exit 1
+    fi
+fi
 
 # ------------------------------------------------------------------------------
 # 6. Launch Standalone Snapchain Read Node
