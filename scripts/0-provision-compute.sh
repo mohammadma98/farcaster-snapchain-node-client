@@ -5,10 +5,12 @@
 # Repository: https://github.com/mohammadma98/farcaster-snapchain-node-client
 #
 # Hardware Targets (Mainnet Read Node):
-# - 4 CPU Cores (vCPUs)  [Minimum: 2 Cores]
-# - 16 GB RAM            [Minimum: 4 GB]
-# - 1.5 TB SSD (gp3/NVMe) [Minimum: 100 GB for initial sync snapshot & RocksDB]
-# - Public IPv4 with ports 22 (SSH), 3381 (HTTP), 3382 (Gossip), 3383 (gRPC), 3000 (Web), 3005 (Grafana)
+# - Matrix Architecture: Decoupled 3x3x3 Adaptive Profiling Engine
+# - CPU Profiles:  C1 (<4 Cores), C2 (4-6 Cores), C3 (>6 Cores)
+# - RAM Profiles:  R1 (<6 GB),    R2 (6-12 GB),   R3 (>12 GB)
+# - Disk Profiles: D1 (HDD),      D2 (SSD),       D3 (NVMe)
+# - Minimum Storage: 750 GB (RAM-Assisted Streaming Pipeline) | 1,400 GB (Bulk Extraction)
+# - Ports: 22 (SSH), 3381 (HTTP API), 3382 (Gossip P2P), 3383 (gRPC), 3000 (Web UI), 3005 (Grafana)
 # ==============================================================================
 
 set -euo pipefail
@@ -55,7 +57,6 @@ prompt_user() {
         return 0
     fi
 
-    # Output prompt message to stderr so user sees it in terminal without polluting subshell stdout
     printf "%b" "$prompt_msg" >&2
 
     if [ -t 0 ]; then
@@ -76,34 +77,53 @@ prompt_user() {
 # Optional mode parameter: 'check' or default full setup
 MODE="${1:-setup}"
 
-# Minimum & Recommended Specifications (Aligned with official farcasterxyz/snapchain standards)
-MIN_CPUS=2
-REC_CPUS=4
-MIN_RAM_GB=4
-REC_RAM_GB=16
-MIN_DISK_GB=100
-REC_DISK_GB=1500
+# Operational Specifications
+MIN_DISK_GB=750       # Optimized for RAM-assisted chunk-by-chunk streaming pipeline
+BULK_DISK_GB=1400     # Required only for unpipelined bulk extraction
+REC_DISK_GB=1500      # Official full recommendation for archive retention
 
 # ------------------------------------------------------------------------------
-# 2. Hardware Inspection & Preliminary Assessment
+# 2. Hardware Inspection & Decoupled Matrix Evaluation
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[1/5] Inspecting System Hardware Specifications...${NC}"
+echo -e "\n${CYAN}${BOLD}[1/5] Inspecting System Hardware & Profile Classification...${NC}"
 
 # Detect CPU cores
 CPUS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)
-echo -e "  - CPU Cores:      ${BOLD}${CPUS}${NC} (Minimum: ${MIN_CPUS}, Recommended: ${REC_CPUS}+)"
+
+if [ "$CPUS" -lt 4 ]; then
+    PROFILE_CPU="C1"
+    CPU_LABEL="Constrained / Low-Core (${CPUS} Core)"
+elif [ "$CPUS" -le 6 ]; then
+    PROFILE_CPU="C2"
+    CPU_LABEL="Balanced Cloud Standard (${CPUS} Cores)"
+else
+    PROFILE_CPU="C3"
+    CPU_LABEL="High-Throughput Dedicated (${CPUS} Cores)"
+fi
+
+echo -e "  - CPU Cores:      ${BOLD}${CPUS}${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_CPU}]${NC} (${CPU_LABEL})"
 
 # Detect RAM
 if [ -f /proc/meminfo ]; then
     RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    RAM_GB=$(( RAM_KB / 1024 / 1024 ))
+    RAM_GB=$(( (RAM_KB + 524288) / 1024 / 1024 )) # Rounded calculation
 else
     RAM_GB=16
 fi
-echo -e "  - System Memory:  ${BOLD}${RAM_GB} GB${NC} (Minimum: ${MIN_RAM_GB} GB, Recommended: ${REC_RAM_GB} GB+)"
 
-# Detect Available Block Storage Mounts (Excluding virtual, boot, and small mounts)
-echo -e "  - Storage Bounds: Official Recommended: ${BOLD}${REC_DISK_GB} GB (1.5 TB SSD)${NC} | Minimum Working Space: ${BOLD}${MIN_DISK_GB} GB${NC}"
+if [ "$RAM_GB" -lt 6 ]; then
+    PROFILE_RAM="R1"
+    RAM_LABEL="Low Memory (${RAM_GB} GB - ZRAM Optimization Required)"
+elif [ "$RAM_GB" -le 12 ]; then
+    PROFILE_RAM="R2"
+    RAM_LABEL="Balanced Memory (${RAM_GB} GB)"
+else
+    PROFILE_RAM="R3"
+    RAM_LABEL="High Memory (${RAM_GB} GB - In-Memory Cache Enabled)"
+fi
+
+echo -e "  - System Memory:  ${BOLD}${RAM_GB} GB${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_RAM}]${NC} (${RAM_LABEL})"
+echo -e "  - Storage Bounds: Streaming Pipeline: ${BOLD}${MIN_DISK_GB} GB${NC} | Bulk Archive: ${BOLD}${BULK_DISK_GB} GB${NC} | Recommended: ${BOLD}${REC_DISK_GB} GB${NC}"
 
 # ------------------------------------------------------------------------------
 # 3. Network Ports Inspection
@@ -150,7 +170,6 @@ for p_entry in "${PORTS_TO_CHECK[@]}"; do
     IFS=':' read -r port proto desc <<< "$p_entry"
     STATUS=$(check_port_status "$port" "$proto")
     if [ "$port" -eq 22 ]; then
-        # Port 22 is expected to be in use for SSH
         echo -e "  ✓ Port ${port}/${proto} (${desc}) is active (SSH connection)."
     elif [ "$STATUS" -eq 0 ]; then
         echo -e "  ✓ Port ${port}/${proto} (${desc}) is free and available."
@@ -177,76 +196,11 @@ if [ "$PORT_CONFLICTS" -gt 0 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 4. Hardware Verification & Policy Enforcement
+# 4. Storage Analysis, Volume Selection & Disk Profile Classification
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[3/5] Evaluating Hardware Sufficiency...${NC}"
+echo -e "\n${CYAN}${BOLD}[3/5] Analyzing Storage Volumes & Detecting Disk Medium...${NC}"
 
-LOW_SPEC_MODE=false
-
-# Critical Insufficiency Check with Operator Override
-if [ "$CPUS" -lt "$MIN_CPUS" ] || [ "$RAM_GB" -lt "$MIN_RAM_GB" ]; then
-    echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}${BOLD} [CRITICAL HARDWARE WARNING] Server Is Below Minimum Specs!     ${NC}"
-    echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "Detected specifications are BELOW the minimum standard operational requirements:"
-    echo -e "  - Detected System:  ${BOLD}${RED}${CPUS} CPU Cores, ${RAM_GB} GB RAM${NC}"
-    echo -e "  - Minimum Standard: ${BOLD}${MIN_CPUS} CPU Cores, ${MIN_RAM_GB} GB RAM${NC}"
-    echo -e "  - Official Specs:   ${BOLD}${REC_CPUS}+ CPU Cores, ${REC_RAM_GB}+ GB RAM, 1.5 TB SSD${NC}\n"
-    echo -e "${RED}${BOLD}⚠ Severe Performance Degradation & Resource Notice:${NC}"
-    if [ "$CPUS" -lt "$MIN_CPUS" ]; then
-        echo -e "  • ${RED}CPU Bottleneck (${CPUS} Core):${NC} Snapshot extraction, block validation, and RocksDB compactions will be ${BOLD}EXTREMELY SLOW${NC}."
-    fi
-    if [ "$RAM_GB" -lt "$MIN_RAM_GB" ]; then
-        echo -e "  • ${RED}Memory Pressure (${RAM_GB} GB):${NC} Tendermint consensus and libp2p gossip mesh may suffer heavy memory load or ${BOLD}Out-Of-Memory (OOM) termination${NC}."
-    fi
-    echo -e "  • Initial state sync may take several days, and real-time transaction ingestion (/v1/submitMessage) may experience delays."
-    echo -e "  • System may experience high load averages and occasional unresponsiveness under peak network traffic.\n"
-
-    if [ "$MODE" != "check" ]; then
-        CONFIRM_LOW_SPEC=$(prompt_user "Do you understand the performance risks and wish to proceed anyway? [y/N]: " "n")
-        case "$CONFIRM_LOW_SPEC" in
-            [yY]|[yY][eE][sS])
-                echo -e "  ${GREEN}✓ Operator confirmation received. Continuing in low-resource compatibility mode.${NC}\n"
-                LOW_SPEC_MODE=true
-                ;;
-            *)
-                echo -e "${RED}[ABORTED] Installation stopped by operator. Please upgrade server resources (min 2 vCPUs, 4 GB RAM).${NC}"
-                exit 1
-                ;;
-        esac
-    fi
-elif [ "$CPUS" -lt "$REC_CPUS" ] || [ "$RAM_GB" -lt "$REC_RAM_GB" ]; then
-    echo -e "  ${YELLOW}${BOLD}⚠ Hardware Warning: Server is below official recommended specs:${NC}"
-    if [ "$CPUS" -lt "$REC_CPUS" ]; then
-        echo -e "    • CPU Cores (${CPUS}) is below recommended ${REC_CPUS}+ cores. Block synchronization and RocksDB compaction will be slower."
-    fi
-    if [ "$RAM_GB" -lt "$REC_RAM_GB" ]; then
-        echo -e "    • System RAM (${RAM_GB} GB) is below recommended ${REC_RAM_GB} GB+. Tendermint consensus may experience memory pressure during high gossip volume."
-    fi
-    echo -e "  ${YELLOW}Server meets minimum operational threshold (${MIN_CPUS} Cores / ${MIN_RAM_GB} GB RAM), but performance may degrade.${NC}\n"
-
-    if [ "$MODE" != "check" ]; then
-        CONFIRM_RES=$(prompt_user "Do you want to confirm and proceed with this configuration? [y/N]: " "n")
-        case "$CONFIRM_RES" in
-            [yY]|[yY][eE][sS])
-                echo -e "  ${GREEN}✓ Operator confirmation received. Proceeding with installation.${NC}\n"
-                ;;
-            *)
-                echo -e "${RED}[ABORTED] Installation stopped by operator.${NC}"
-                exit 1
-                ;;
-        esac
-    fi
-else
-    echo -e "  ${GREEN}✓ CPU cores and System RAM satisfy all recommended specifications.${NC}\n"
-fi
-
-# ------------------------------------------------------------------------------
-# 5. Storage Analysis & Operator Volume Selection
-# ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[4/5] Analyzing Available Storage Volumes...${NC}"
-
-# Parse all real block storage devices with >= MIN_DISK_GB (100 GB) free space
+# Parse real block storage devices with >= MIN_DISK_GB (750 GB) free space
 ELIGIBLE_MOUNTS=()
 while IFS='|' read -r m_mount m_avail m_total m_used m_device; do
     if [ -n "$m_mount" ]; then
@@ -267,15 +221,14 @@ TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
 
 if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
     echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}${BOLD}  ⚠ Storage Warning: Free Space Below Recommended 100 GB       ${NC}"
+    echo -e "${YELLOW}${BOLD}  ⚠ Storage Notice: Free Space is Below ${MIN_DISK_GB} GB Baseline       ${NC}"
     echo -e "${YELLOW}${BOLD}================================================================${NC}"
     echo -e "${YELLOW}No storage volume on this server has at least ${MIN_DISK_GB} GB of free space.${NC}"
-    echo -e "Official Snapchain specification requires ${BOLD}${REC_DISK_GB} GB (1.5 TB SSD)${NC} for archive retention,"
-    echo -e "and an absolute minimum of ${BOLD}${MIN_DISK_GB} GB${NC} to download snapshots without risk of disk exhaustion."
-    echo -e "\n${YELLOW}Searching for mounted volumes with at least 5 GB available...${NC}"
+    echo -e "Note: The streaming chunk pipeline requires ~550-750 GB to materialize RocksDB."
+    echo -e "\n${YELLOW}Searching for mounted volumes with at least 50 GB available...${NC}"
 
     while IFS='|' read -r m_mount m_avail m_total m_used m_device; do
-        if [ -n "$m_mount" ] && [ "${m_avail:-0}" -ge 5 ]; then
+        if [ -n "$m_mount" ] && [ "${m_avail:-0}" -ge 50 ]; then
             ELIGIBLE_MOUNTS+=("${m_mount}|${m_avail}|${m_total}|${m_used}|${m_device}")
         fi
     done < <(df -P -BG 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
@@ -290,26 +243,21 @@ if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
     TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
 
     if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
-        echo -e "\n${RED}${BOLD}================================================================${NC}"
-        echo -e "${RED}${BOLD}[FATAL ERROR] Insufficient Free Storage Space (< 5 GB)!         ${NC}"
-        echo -e "${RED}${BOLD}================================================================${NC}"
-        echo -e "${RED}Server has less than 5 GB of free space across all block devices.${NC}"
-        echo -e "Cannot continue because Docker containers and Snapchain base files require working space.\n"
-        echo -e "Detected block partitions:"
-        df -h -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs 2>/dev/null || df -h
-        echo -e "\n${RED}Please free up disk space and re-run.${NC}"
+        echo -e "\n${RED}${BOLD}[FATAL ERROR] Insufficient Free Storage Space (< 50 GB)!${NC}"
+        echo -e "${RED}Server does not have enough storage space to bootstrap a Snapchain node.${NC}"
+        df -h -x tmpfs -x devtmpfs -x overlay 2>/dev/null || df -h
         exit 1
     fi
 
     if [ "$MODE" != "check" ]; then
-        echo -e "${YELLOW}Operating on constrained storage (< 100 GB) may fill up during snapshot extraction.${NC}"
+        echo -e "${YELLOW}Warning: Proceeding with < ${MIN_DISK_GB} GB may cause disk exhaustion during sync.${NC}"
         CONFIRM_DISK=$(prompt_user "Do you want to proceed with available storage anyway? [y/N]: " "n")
         case "$CONFIRM_DISK" in
             [yY]|[yY][eE][sS])
-                echo -e "  ${GREEN}✓ Operator confirmation received. Proceeding with available storage.${NC}\n"
+                echo -e "  ${GREEN}✓ Proceeding with available volume.${NC}\n"
                 ;;
             *)
-                echo -e "${RED}[ABORTED] Installation stopped by operator. Please expand storage.${NC}"
+                echo -e "${RED}[ABORTED] Setup stopped by operator.${NC}"
                 exit 1
                 ;;
         esac
@@ -327,7 +275,7 @@ if [ "$TOTAL_ELIGIBLE" -eq 1 ]; then
     SELECTED_AVAIL="$s_avail"
     SELECTED_DEVICE="$s_device"
 
-    echo -e "  Found 1 eligible storage volume with sufficient capacity:"
+    echo -e "  Found 1 eligible storage volume:"
     echo -e "  - Mount:      ${BOLD}${s_mount}${NC}"
     echo -e "  - Available:  ${BOLD}${s_avail} GB${NC} (Total: ${s_total}, Device: ${s_device})"
     
@@ -349,20 +297,20 @@ if [ "$TOTAL_ELIGIBLE" -eq 1 ]; then
             ;;
     esac
 else
-    echo -e "  ${GREEN}Detected ${TOTAL_ELIGIBLE} eligible storage volumes (>= ${MIN_DISK_GB} GB free space):${NC}\n"
+    echo -e "  ${GREEN}Detected ${TOTAL_ELIGIBLE} eligible storage volumes:${NC}\n"
     IDX=1
     for entry in "${ELIGIBLE_MOUNTS[@]}"; do
         IFS='|' read -r em_mount em_avail em_total em_used em_device <<< "$entry"
         TAG=""
         if [ "$IDX" -eq 1 ]; then
-            TAG="${GREEN}${BOLD}[RECOMMENDED - Largest Free Space]${NC}"
+            TAG="${GREEN}${BOLD}[RECOMMENDED]${NC}"
         fi
         echo -e "  [${BOLD}${IDX}${NC}] Mount: ${BOLD}${em_mount}${NC} | Free: ${BOLD}${em_avail} GB${NC} | Total: ${em_total} | Device: ${em_device} ${TAG}"
         IDX=$((IDX + 1))
     done
 
     echo ""
-    CHOICE=$(prompt_user "Select storage volume for Snapchain node installation [1-${TOTAL_ELIGIBLE}] (Default: 1): " "1")
+    CHOICE=$(prompt_user "Select storage volume for installation [1-${TOTAL_ELIGIBLE}] (Default: 1): " "1")
     if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "$TOTAL_ELIGIBLE" ]; then
         CHOICE=1
     fi
@@ -384,16 +332,52 @@ else
     SELECTED_SNAPCHAIN_DIR="${DIR_INPUT:-$DEFAULT_PATH}"
 fi
 
+# Detect Storage Medium (HDD vs SSD vs NVMe)
+detect_disk_medium() {
+    local dev="$1"
+    local raw_dev
+    raw_dev=$(basename "$dev" 2>/dev/null || echo "")
+
+    # Strip partition suffix (e.g. sda1 -> sda, nvme0n1p1 -> nvme0n1)
+    if [[ "$raw_dev" =~ ^nvme ]]; then
+        raw_dev=$(echo "$raw_dev" | sed -E 's/p[0-9]+$//')
+    else
+        raw_dev=$(echo "$raw_dev" | sed -E 's/[0-9]+$//')
+    fi
+
+    local rota=1
+    if [ -f "/sys/block/${raw_dev}/queue/rotational" ]; then
+        rota=$(cat "/sys/block/${raw_dev}/queue/rotational" 2>/dev/null || echo 1)
+    elif command -v lsblk &>/dev/null; then
+        rota=$(lsblk -dno ROTA "$dev" 2>/dev/null | head -n 1 || echo 1)
+    fi
+
+    if [ "$rota" -eq 1 ]; then
+        echo "D1:HDD:Rotational Mechanical Hard Disk"
+    else
+        if [[ "$dev" =~ nvme ]] || [[ "$raw_dev" =~ nvme ]]; then
+            echo "D3:NVMe:High-Performance PCIe NVMe Solid-State Drive"
+        else
+            echo "D2:SSD:Standard Solid-State Drive"
+        fi
+    fi
+}
+
+DISK_METRIC=$(detect_disk_medium "$SELECTED_DEVICE")
+IFS=':' read -r PROFILE_DISK DISK_TYPE DISK_LABEL <<< "$DISK_METRIC"
+echo -e "  - Disk Medium:    ${BOLD}${SELECTED_DEVICE}${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_DISK}]${NC} (${DISK_LABEL})"
+
 # If mode is check-only, display summary and exit without modifying system
 if [ "$MODE" == "check" ]; then
     echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-    echo -e "${GREEN}${BOLD}  ✓ Hardware check & storage evaluation complete!               ${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ Hardware check & matrix evaluation complete!                ${NC}"
     echo -e "${GREEN}${BOLD}================================================================${NC}"
-    echo -e "System Summary:"
-    echo -e "  - CPU Cores:      ${BOLD}${CPUS}${NC}"
-    echo -e "  - System RAM:     ${BOLD}${RAM_GB} GB${NC}"
-    echo -e "  - Target Storage: ${BOLD}${SELECTED_MOUNT}${NC} (${SELECTED_AVAIL} GB available on ${SELECTED_DEVICE})"
-    echo -e "  - Proposed Path:  ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}\n"
+    echo -e "System Matrix Classification:"
+    echo -e "  - CPU Profile:    ${BOLD}[${PROFILE_CPU}]${NC} (${CPU_LABEL})"
+    echo -e "  - RAM Profile:    ${BOLD}[${PROFILE_RAM}]${NC} (${RAM_LABEL})"
+    echo -e "  - Disk Profile:   ${BOLD}[${PROFILE_DISK}]${NC} (${DISK_LABEL})"
+    echo -e "  - Selected Mount: ${BOLD}${SELECTED_MOUNT}${NC} (${SELECTED_AVAIL} GB free on ${SELECTED_DEVICE})"
+    echo -e "  - Target Path:    ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}\n"
     exit 0
 fi
 
@@ -404,7 +388,6 @@ $SUDO touch "$SELECTED_SNAPCHAIN_DIR/.write_test_$$" 2>/dev/null && $SUDO rm -f 
     exit 1
 }
 
-# If running non-root, ensure user has ownership
 if [ -n "$SUDO" ] && [ -n "${USER:-}" ]; then
     $SUDO chown -R "$USER":"$USER" "$SELECTED_SNAPCHAIN_DIR" 2>/dev/null || true
 fi
@@ -413,48 +396,137 @@ $SUDO chmod 775 "$SELECTED_SNAPCHAIN_DIR"
 echo -e "  ${GREEN}✓ Target directory verified and writable:${NC} ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
 
 # ------------------------------------------------------------------------------
-# 6. Automated Docker, Firewall, and Kernel Tuning
+# 5. Advanced Adaptive Memory & Swap Engineering (ZRAM vs Disk Swap)
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[5/5] Configuring System Services & Runtime Environment...${NC}"
+echo -e "\n${CYAN}${BOLD}[4/5] Configuring Memory Subsystem & Swap Architecture...${NC}"
 
-# Virtual Memory & Swap Optimization for Low-RAM Systems (< 4 GB)
-if [ "$RAM_GB" -lt 4 ]; then
-    echo -e "  • Evaluating virtual memory & swap allocation..."
-    SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
-    if [ "$SWAP_TOTAL_KB" -lt 1048576 ]; then
-        echo -e "    ${YELLOW}Notice: Server has limited RAM (${RAM_GB} GB) and less than 1 GB swap.${NC}"
-        ROOT_FREE_GB=$(df -P -BG / 2>/dev/null | awk 'NR==2 {gsub(/[^0-9]/, "", $4); print $4}' || echo 0)
-        if [ "$ROOT_FREE_GB" -ge 4 ]; then
-            CREATE_SWAP=$(prompt_user "    Create a 2 GB swapfile to protect against Out-Of-Memory (OOM) crashes? [Y/n]: " "y")
-            case "$CREATE_SWAP" in
-                [yY]|[yY][eE][sS]|"")
-                    echo -e "    Allocating 2 GB swapfile at /swapfile..."
-                    $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
-                    if [ -f /swapfile ]; then
-                        $SUDO chmod 600 /swapfile
-                        $SUDO mkswap /swapfile > /dev/null 2>&1 || true
-                        $SUDO swapon /swapfile > /dev/null 2>&1 || true
-                        if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
-                            echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab > /dev/null
-                        fi
-                        echo -e "    ${GREEN}✓ 2 GB swapfile active and persisted in /etc/fstab.${NC}"
-                    fi
-                    ;;
-                *)
-                    echo -e "    ${YELLOW}Skipping swap creation. Note: Node may be killed by OOM-killer during peak load.${NC}"
-                    ;;
-            esac
+ZRAM_ACTIVE=false
+
+if [ "$PROFILE_RAM" == "R1" ]; then
+    echo -e "  • Applying Profile [R1] Memory Engineering (Low-RAM Defense)..."
+    
+    # 1. Purge or deactivate rotational HDD swap to prevent catastrophic I/O thrashing
+    if [ "$PROFILE_DISK" == "D1" ]; then
+        if [ -f /swapfile ] && swapon --show | grep -q '/swapfile'; then
+            echo -e "    ${YELLOW}⚠ Active swapfile detected on mechanical HDD. Deactivating to prevent I/O freeze...${NC}"
+            $SUDO swapoff /swapfile 2>/dev/null || true
+            $SUDO sed -i '\|^/swapfile|d' /etc/fstab 2>/dev/null || true
+            echo -e "    ${GREEN}✓ Rotational HDD swap successfully disabled.${NC}"
         fi
-    else
-        SWAP_GB=$(( SWAP_TOTAL_KB / 1024 / 1024 ))
-        echo -e "    ${GREEN}✓ Active swap detected (${SWAP_GB} GB).${NC}"
+    fi
+
+    # 2. Configure ZRAM (RAM Compression via LZ4)
+    echo -e "    Attempting to initialize high-speed compressed in-memory swap (ZRAM)..."
+    if $SUDO modprobe zram num_devices=1 2>/dev/null; then
+        if [ -b /dev/zram0 ]; then
+            $SUDO swapoff /dev/zram0 2>/dev/null || true
+            echo lz4 | $SUDO tee /sys/block/zram0/comp_algorithm > /dev/null 2>&1 || true
+            # Allocate 2.5 GB compressed virtual swap
+            echo 2684354560 | $SUDO tee /sys/block/zram0/disksize > /dev/null 2>&1 || true
+            $SUDO mkswap /dev/zram0 > /dev/null 2>&1 || true
+            $SUDO swapon -p 100 /dev/zram0 > /dev/null 2>&1 || true
+            ZRAM_ACTIVE=true
+            echo -e "    ${GREEN}✓ 2.5 GB ZRAM compressed swap active (Priority: 100, Algorithm: LZ4).${NC}"
+        fi
+    fi
+
+    if [ "$ZRAM_ACTIVE" != "true" ]; then
+        echo -e "    ${YELLOW}Notice: Kernel zram module not available in this virtual environment.${NC}"
+        SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
+        if [ "$SWAP_TOTAL_KB" -lt 1048576 ] && [ "$PROFILE_DISK" != "D1" ]; then
+            echo -e "    Allocating 2 GB emergency swapfile on non-rotational disk..."
+            $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
+            $SUDO chmod 600 /swapfile
+            $SUDO mkswap /swapfile > /dev/null 2>&1 || true
+            $SUDO swapon /swapfile > /dev/null 2>&1 || true
+            echo -e "    ${GREEN}✓ 2 GB safety swapfile active.${NC}"
+        fi
+    fi
+else
+    echo -e "  • Profile [${PROFILE_RAM}] detected: Sufficient host memory available (${RAM_GB} GB)."
+fi
+
+# ------------------------------------------------------------------------------
+# 6. Granular Kernel & I/O Engine Tuning (Adaptive /etc/sysctl.d)
+# ------------------------------------------------------------------------------
+echo -e "\n${CYAN}${BOLD}[5/5] Applying Adaptive Kernel & Storage Optimization...${NC}"
+
+# Base P2P network capabilities
+$SUDO sysctl -w fs.file-max=2097152 > /dev/null 2>&1 || true
+$SUDO sysctl -w net.core.somaxconn=65535 > /dev/null 2>&1 || true
+$SUDO sysctl -w net.ipv4.tcp_max_syn_backlog=65535 > /dev/null 2>&1 || true
+$SUDO sysctl -w vm.max_map_count=262144 > /dev/null 2>&1 || true
+
+# Tailored Dirty Pages & Virtual Memory parameters based on Disk & RAM Profile
+if [ "$PROFILE_DISK" == "D1" ]; then
+    # Rotational HDD: Flush dirty pages immediately in tiny increments to prevent disk head stalls
+    VM_DIRTY_BG=3
+    VM_DIRTY=6
+    VM_VFS_PRESSURE=50
+    VM_SWAPPINESS=10
+elif [ "$PROFILE_DISK" == "D2" ]; then
+    # Standard SSD
+    VM_DIRTY_BG=10
+    VM_DIRTY=20
+    VM_VFS_PRESSURE=100
+    VM_SWAPPINESS=20
+else
+    # D3 (NVMe)
+    VM_DIRTY_BG=15
+    VM_DIRTY=30
+    VM_VFS_PRESSURE=100
+    VM_SWAPPINESS=10
+fi
+
+# Network socket buffer scaling
+if [ "$PROFILE_RAM" == "R1" ]; then
+    NET_RMEM=8388608   # 8 MB to protect low-RAM host
+    NET_WMEM=8388608
+else
+    NET_RMEM=16777216  # 16 MB standard P2P gossip buffers
+    NET_WMEM=16777216
+fi
+
+$SUDO sysctl -w vm.dirty_background_ratio=$VM_DIRTY_BG > /dev/null 2>&1 || true
+$SUDO sysctl -w vm.dirty_ratio=$VM_DIRTY > /dev/null 2>&1 || true
+$SUDO sysctl -w vm.vfs_cache_pressure=$VM_VFS_PRESSURE > /dev/null 2>&1 || true
+$SUDO sysctl -w vm.swappiness=$VM_SWAPPINESS > /dev/null 2>&1 || true
+$SUDO sysctl -w net.core.rmem_max=$NET_RMEM > /dev/null 2>&1 || true
+$SUDO sysctl -w net.core.wmem_max=$NET_WMEM > /dev/null 2>&1 || true
+
+# Persist sysctl parameters
+cat <<EOF | $SUDO tee /etc/sysctl.d/99-snapchain.conf > /dev/null
+# Farcaster Snapchain Optimized Kernel Parameters
+# Generated for Profile: CPU=[${PROFILE_CPU}], RAM=[${PROFILE_RAM}], Disk=[${PROFILE_DISK}]
+fs.file-max = 2097152
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+vm.max_map_count = 262144
+vm.dirty_background_ratio = ${VM_DIRTY_BG}
+vm.dirty_ratio = ${VM_DIRTY}
+vm.vfs_cache_pressure = ${VM_VFS_PRESSURE}
+vm.swappiness = ${VM_SWAPPINESS}
+net.core.rmem_max = ${NET_RMEM}
+net.core.wmem_max = ${NET_WMEM}
+net.ipv4.udp_rmem_min = 16384
+net.ipv4.udp_wmem_min = 16384
+EOF
+
+echo -e "  ${GREEN}✓ Kernel sysctl parameters persisted to /etc/sysctl.d/99-snapchain.conf${NC}"
+
+# Mount Optimization (noatime to eliminate metadata writes on reads)
+if [ -f /etc/fstab ] && [ -n "$SELECTED_MOUNT" ]; then
+    if ! grep -E "\s${SELECTED_MOUNT}\s.*noatime" /etc/fstab > /dev/null 2>&1; then
+        echo -e "  • Filesystem metadata optimization: applying noatime to ${SELECTED_MOUNT}..."
+        $SUDO mount -o remount,noatime "$SELECTED_MOUNT" 2>/dev/null || true
+        echo -e "    ${GREEN}✓ noatime active on ${SELECTED_MOUNT} (eliminates random write overhead on block reads).${NC}"
     fi
 fi
 
 # Docker Engine & Compose
 echo -e "  • Verifying Docker Engine & Container Runtime..."
 if ! command -v docker &> /dev/null; then
-    echo "    - Docker not detected. Installing official Docker Engine..."
+    echo "    - Installing official Docker Engine..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
     $SUDO sh /tmp/get-docker.sh
     rm -f /tmp/get-docker.sh
@@ -464,12 +536,11 @@ if ! command -v docker &> /dev/null; then
     fi
     echo -e "    ${GREEN}✓ Docker Engine successfully installed.${NC}"
 else
-    echo -e "    ${GREEN}✓ Docker is already installed: $(docker --version)${NC}"
+    echo -e "    ${GREEN}✓ Docker is active: $(docker --version)${NC}"
 fi
 
 if command -v systemctl &> /dev/null; then
     $SUDO systemctl enable --now docker > /dev/null 2>&1 || true
-    echo -e "    ${GREEN}✓ Docker service enabled and active.${NC}"
 fi
 
 # Firewall Configuration (UFW)
@@ -482,93 +553,61 @@ if command -v ufw &> /dev/null; then
     $SUDO ufw allow 3383/tcp comment 'Snapchain gRPC API' > /dev/null 2>&1 || true
     $SUDO ufw allow 3000/tcp comment 'Farcaster Web Client' > /dev/null 2>&1 || true
     $SUDO ufw allow 3005/tcp comment 'Grafana Metrics Dashboard' > /dev/null 2>&1 || true
-
-    echo -e "    ${GREEN}✓ UFW rules configured:${NC}"
-    echo -e "      - Port 22/tcp        (SSH)"
-    echo -e "      - Port 3381/tcp      (HTTP API & Writes)"
-    echo -e "      - Port 3382/udp+tcp  (P2P Gossip Mesh - QUIC & TCP)"
-    echo -e "      - Port 3383/tcp      (gRPC API)"
-    echo -e "      - Port 3000/tcp      (Farcaster Web Client)"
-    echo -e "      - Port 3005/tcp      (Grafana Metrics)"
+    echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3005, 3381, 3382, 3383).${NC}"
 else
-    echo -e "    ${YELLOW}• UFW firewall not active. Ensure cloud security groups permit ports 22, 3000, 3005, 3381, 3382 (UDP/TCP), 3383.${NC}"
-fi
-
-# Kernel Tuning for P2P Gossip Throughput & RocksDB
-echo -e "  • Tuning Linux kernel network buffers and virtual memory..."
-$SUDO sysctl -w fs.file-max=2097152 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.core.somaxconn=65535 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.ipv4.tcp_max_syn_backlog=65535 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.core.rmem_max=16777216 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.core.wmem_max=16777216 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.ipv4.udp_rmem_min=16384 > /dev/null 2>&1 || true
-$SUDO sysctl -w net.ipv4.udp_wmem_min=16384 > /dev/null 2>&1 || true
-$SUDO sysctl -w vm.max_map_count=262144 > /dev/null 2>&1 || true
-
-# Persist kernel tuning
-if [ -d /etc/sysctl.d ]; then
-    cat <<EOF | $SUDO tee /etc/sysctl.d/99-snapchain.conf > /dev/null
-# Snapchain P2P Gossip & RocksDB Optimization
-fs.file-max = 2097152
-net.core.somaxconn = 65535
-net.ipv4.tcp_max_syn_backlog = 65535
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.udp_rmem_min = 16384
-net.ipv4.udp_wmem_min = 16384
-vm.max_map_count = 262144
-EOF
-    echo -e "    ${GREEN}✓ Kernel parameters saved to /etc/sysctl.d/99-snapchain.conf${NC}"
-elif [ -w /etc/sysctl.conf ]; then
-    echo -e "\n# Snapchain P2P Tuning\nfs.file-max=2097152\nnet.core.somaxconn=65535\nvm.max_map_count=262144" | $SUDO tee -a /etc/sysctl.conf > /dev/null
-    echo -e "    ${GREEN}✓ Kernel parameters appended to /etc/sysctl.conf${NC}"
+    echo -e "    ${YELLOW}• UFW firewall not active. Ensure cloud security groups permit required ports.${NC}"
 fi
 
 # ------------------------------------------------------------------------------
-# 7. Persist Node Provisioning State
+# 7. Persist System Matrix State Configuration
 # ------------------------------------------------------------------------------
 $SUDO mkdir -p /etc/snapchain
 cat <<EOF | $SUDO tee /etc/snapchain/snapchain.conf > /dev/null
 # Farcaster Snapchain Node System Configuration
-# Generated by 0-provision-compute.sh
+# Generated by 0-provision-compute.sh (Decoupled Matrix Architecture)
 PROVISIONED=true
-HARDWARE_SUPPORTED=true
-LOW_SPEC_MODE="${LOW_SPEC_MODE:-false}"
+PROVISION_VERSION="2.1.0"
 PROVISION_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+# Decoupled Hardware Matrix
+PROFILE_CPU="${PROFILE_CPU}"
+PROFILE_RAM="${PROFILE_RAM}"
+PROFILE_DISK="${PROFILE_DISK}"
+DISK_TYPE="${DISK_TYPE}"
+CPU_CORES="${CPUS}"
+RAM_GB="${RAM_GB}"
+ZRAM_ACTIVE="${ZRAM_ACTIVE}"
+
+# Storage Bounds & Directory
 SNAPCHAIN_DATA_DIR="${SELECTED_SNAPCHAIN_DIR}"
 SELECTED_MOUNT="${SELECTED_MOUNT}"
 STORAGE_DEVICE="${SELECTED_DEVICE}"
 STORAGE_AVAIL_GB="${SELECTED_AVAIL}"
-CPU_CORES="${CPUS}"
-RAM_GB="${RAM_GB}"
-PROVISION_VERSION="2.0.0"
+MIN_REQUIRED_GB="${MIN_DISK_GB}"
 EOF
 
 $SUDO chmod 644 /etc/snapchain/snapchain.conf
-
-# Mirror configuration to user home and data directory for easy lookup
 cat /etc/snapchain/snapchain.conf > "${HOME}/.snapchain.conf" 2>/dev/null || true
 cat /etc/snapchain/snapchain.conf > "${SELECTED_SNAPCHAIN_DIR}/.snapchain.env" 2>/dev/null || true
 
 echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-echo -e "${GREEN}${BOLD}  ✓ Step (0) Complete: Server is fully provisioned and ready!   ${NC}"
+echo -e "${GREEN}${BOLD}  ✓ Step (0) Complete: Server Provisioned with Adaptive Matrix! ${NC}"
 echo -e "${GREEN}${BOLD}================================================================${NC}"
-echo -e "Provisioned Configuration Summary:"
-echo -e "  - Data Directory:  ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
-echo -e "  - Storage Volume:  ${BOLD}${SELECTED_MOUNT}${NC} (${SELECTED_AVAIL} GB available on ${SELECTED_DEVICE})"
-echo -e "  - System Specs:    ${BOLD}${CPUS} CPU Cores / ${RAM_GB} GB RAM${NC}"
-echo -e "  - System State:    Saved to ${BOLD}/etc/snapchain/snapchain.conf${NC}\n"
+echo -e "Matrix Configuration Summary:"
+echo -e "  - CPU Profile:     ${BOLD}[${PROFILE_CPU}]${NC} (${CPU_LABEL})"
+echo -e "  - RAM Profile:     ${BOLD}[${PROFILE_RAM}]${NC} (${RAM_LABEL})"
+echo -e "  - Disk Profile:    ${BOLD}[${PROFILE_DISK}]${NC} (${DISK_LABEL})"
+echo -e "  - Target Data Dir: ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
+echo -e "  - Configuration:   Saved to ${BOLD}/etc/snapchain/snapchain.conf${NC}\n"
 
 # ------------------------------------------------------------------------------
-# 8. Interactive Prompt to Execute Step (1) Automatically
+# 8. Interactive Prompt to Execute Step (1)
 # ------------------------------------------------------------------------------
 AUTO_STEP1=$(prompt_user "Would you like to automatically run Step (1) [Setup Snapchain Read Node] now? [Y/n]: " "y")
 
 case "$AUTO_STEP1" in
     [yY]|[yY][eE][sS])
         echo -e "\n${CYAN}${BOLD}Launching Step (1): Setting up Standalone Snapchain Read Node...${NC}\n"
-        
-        # Check if local script exists
         if [ -f "./scripts/1-setup-read-node.sh" ]; then
             exec bash "./scripts/1-setup-read-node.sh"
         elif [ -f "./1-setup-read-node.sh" ]; then
