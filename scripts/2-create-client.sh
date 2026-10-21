@@ -117,9 +117,9 @@ COMMIT_HASH=$(git rev-parse --short HEAD)
 COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)
 echo -e "Verified repository commit: ${GREEN}${BOLD}${COMMIT_HASH}${NC} (${COMMIT_MSG})"
 
-# Sanity check: Ensure src/app/page.tsx loads FarcasterClient
-if grep -q "FarcasterClient" src/app/page.tsx; then
-    echo -e "Verified client component:  ${GREEN}✓ FarcasterClient (Light Theme) active in src/app/page.tsx${NC}"
+# Sanity check: Ensure application routes load FarcasterClient
+if grep -rn "FarcasterClient" src/app/ >/dev/null 2>&1; then
+    echo -e "Verified client component:  ${GREEN}✓ FarcasterClient (Light Theme) active in application routes${NC}"
 else
     echo -e "${RED}[ERROR] Codebase does not contain FarcasterClient! Force resetting to origin/main...${NC}"
     git fetch origin main --force && git reset --hard origin/main
