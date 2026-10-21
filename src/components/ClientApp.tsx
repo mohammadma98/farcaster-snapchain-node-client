@@ -1008,14 +1008,6 @@ export function ClientApp({ lang }: ClientAppProps) {
               <span>{t.securityNoticeTitle}</span>
             </div>
             <p className="text-[11px] text-amber-200/70 leading-relaxed">{t.securityNoticeBody}</p>
-            <button
-              onClick={handleLaunchSandbox}
-              disabled={isAuthenticating}
-              className="mt-2 w-full rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 text-xs font-semibold py-2 transition-colors flex items-center justify-center gap-1.5"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-              <span>{t.generateSandbox}</span>
-            </button>
           </div>
         </div>
       </div>
@@ -1038,55 +1030,7 @@ export function ClientApp({ lang }: ClientAppProps) {
               </button>
             </div>
 
-            {/* Modal Tabs */}
-            <div className="grid grid-cols-2 gap-2 rounded-xl bg-black/60 p-1 border border-white/5">
-              <button
-                onClick={() => setAuthTab('sandbox')}
-                className={`rounded-lg py-2 text-xs font-semibold transition-all ${
-                  authTab === 'sandbox'
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'text-purple-200/60 hover:text-white'
-                }`}
-              >
-                1-Click Sandbox
-              </button>
-              <button
-                onClick={() => setAuthTab('import')}
-                className={`rounded-lg py-2 text-xs font-semibold transition-all ${
-                  authTab === 'import'
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'text-purple-200/60 hover:text-white'
-                }`}
-              >
-                Import Key / Seed
-              </button>
-            </div>
-
-            {/* Tab 1: Sandbox */}
-            {authTab === 'sandbox' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-purple-300 font-bold text-xs">
-                    <Sparkles className="h-4 w-4 text-purple-400" />
-                    <span>{t.authSandboxTitle}</span>
-                  </div>
-                  <p className="text-xs text-purple-200/70 leading-relaxed">{t.authSandboxDesc}</p>
-                </div>
-
-                <button
-                  onClick={handleLaunchSandbox}
-                  disabled={isAuthenticating}
-                  className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs py-3 transition-all shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  <span>{isAuthenticating ? 'Generating EIP-712 Keys...' : t.connectSandboxBtn}</span>
-                </button>
-              </div>
-            )}
-
-            {/* Tab 2: Import Key */}
-            {authTab === 'import' && (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 <div className="rounded-xl border border-amber-500/20 bg-amber-950/10 p-3 space-y-1">
                   <div className="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
                     <ShieldAlert className="h-3.5 w-3.5" />
@@ -1128,7 +1072,6 @@ export function ClientApp({ lang }: ClientAppProps) {
                   <span>{isAuthenticating ? 'Signing EIP-712...' : t.connectCustodyBtn}</span>
                 </button>
               </div>
-            )}
 
             {authError && (
               <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-2.5 text-xs text-amber-300 flex items-center gap-2">

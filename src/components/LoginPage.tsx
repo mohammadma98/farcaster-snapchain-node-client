@@ -4,17 +4,11 @@ import React, { useState } from 'react';
 import {
   Key,
   ShieldAlert,
-  Sparkles,
   Clipboard,
-  Check,
   ArrowRight,
   Loader2,
   Lock,
-  Terminal,
-  HelpCircle,
-  ChevronDown,
   X,
-  Copy,
 } from 'lucide-react';
 import { UserSession } from '@/lib/farcaster/types';
 
@@ -26,13 +20,8 @@ interface LoginPageProps {
 
 export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps) {
   const [mnemonic, setMnemonic] = useState('');
-  const [usernameOrFid, setUsernameOrFid] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isGeneratingDev, setIsGeneratingDev] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generatedDevPhrase, setGeneratedDevPhrase] = useState<string | null>(null);
-  const [copiedDevMnemonic, setCopiedDevMnemonic] = useState(false);
-  const [showAdvancedOverride, setShowAdvancedOverride] = useState(false);
 
   // Word count detection
   const words = mnemonic.trim().split(/\s+/).filter(Boolean);
@@ -52,16 +41,6 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
     }
   };
 
-  const handleCopyGenerated = async (phrase: string) => {
-    try {
-      await navigator.clipboard.writeText(phrase);
-      setCopiedDevMnemonic(true);
-      setTimeout(() => setCopiedDevMnemonic(false), 2500);
-    } catch {
-      // clipboard write failed
-    }
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mnemonic.trim()) {
@@ -77,24 +56,13 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
     setError(null);
 
     try {
-      const payload: {
-        mnemonic: string;
-        nodeUrl: string;
-        usernameOrFid?: string;
-      } = {
-        mnemonic: mnemonic.trim(),
-        nodeUrl,
-      };
-
-      // If developer specified manual override, include it
-      if (usernameOrFid.trim()) {
-        payload.usernameOrFid = usernameOrFid.trim();
-      }
-
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          mnemonic: mnemonic.trim(),
+          nodeUrl,
+        }),
       });
 
       const data = await res.json();
@@ -107,29 +75,6 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
       setError(err.message || 'Login error occurred');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleGenerateDevAccount = async () => {
-    setIsGeneratingDev(true);
-    setError(null);
-
-    try {
-      const res = await fetch(`/api/auth/sandbox?nodeUrl=${encodeURIComponent(nodeUrl)}`, {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.error || 'Failed to generate dev account');
-      }
-
-      setGeneratedDevPhrase(data.mnemonic);
-      setMnemonic(data.mnemonic);
-      onLoginSuccess(data.user);
-    } catch (err: any) {
-      setError(err.message || 'Failed to initialize dev account');
-    } finally {
-      setIsGeneratingDev(false);
     }
   };
 
@@ -178,68 +123,7 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
           </div>
         )}
 
-        {/* 1-Click Sandbox Test Generator (Offline Dev Mode) */}
-        <div className="rounded-xl border border-purple-100 bg-purple-50/70 p-4 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-purple-600" />
-              <span className="text-xs font-semibold text-purple-950">Need a quick test account?</span>
-            </div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider bg-purple-200/80 text-purple-900 px-2 py-0.5 rounded-full">
-              Offline Sandbox
-            </span>
-          </div>
-          <p className="text-xs text-purple-900/80 leading-relaxed">
-            Generates a fresh 24-word cryptographic seed phrase and issues local gasless keys.
-            Ideal for experimenting in the local sandbox simulator without needing an on-chain account.
-          </p>
-
-          {generatedDevPhrase ? (
-            <div className="rounded-lg border border-purple-200 bg-white p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-purple-900">Generated 24-Word Seed Phrase:</span>
-                <button
-                  type="button"
-                  onClick={() => handleCopyGenerated(generatedDevPhrase)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-purple-700 hover:text-purple-800"
-                >
-                  {copiedDevMnemonic ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                  <span>{copiedDevMnemonic ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-              <p className="text-[11px] font-mono text-purple-950 break-words leading-relaxed bg-purple-50 p-2 rounded border border-purple-100">
-                {generatedDevPhrase}
-              </p>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleGenerateDevAccount}
-              disabled={isGeneratingDev || isLoading}
-              className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 px-4 text-xs shadow-sm transition-all disabled:opacity-50"
-            >
-              {isGeneratingDev ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Generating 24-Word Keys...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>Generate Local Sandbox Account (1-Click)</span>
-                </>
-              )}
-            </button>
-          )}
-        </div>
-
-        <div className="relative flex py-1 items-center">
-          <div className="flex-grow border-t border-gray-200" />
-          <span className="flex-shrink mx-4 text-xs font-medium text-gray-400 uppercase">Or Import Existing Farcaster Account</span>
-          <div className="flex-grow border-t border-gray-200" />
-        </div>
-
-        {/* Form: Farcaster Standard (24-word recovery phrase, auto-resolved FID) */}
+        {/* Form: 100% Pure Farcaster Standard (24-word recovery phrase, auto-detected on-chain FID) */}
         <form onSubmit={handleLogin} className="space-y-4">
           {/* Mnemonic Textarea */}
           <div className="space-y-1.5">
@@ -305,51 +189,9 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
                 {wordCount} words {wordCount === 24 ? '(Valid 24-Word Standard)' : wordCount === 12 ? '(12-Word Legacy)' : 'detected'}
               </span>
             </div>
-            <p className="text-[11px] text-gray-400 leading-tight">
-              FID, username, and profile are automatically detected from your custody address on the node.
+            <p className="text-[11px] text-gray-500 leading-tight">
+              Your FID, username, and profile are automatically detected from the blockchain and your Snapchain node.
             </p>
-          </div>
-
-          {/* Advanced / Manual Override (Optional Collapsible) */}
-          <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50">
-            <button
-              type="button"
-              onClick={() => setShowAdvancedOverride(!showAdvancedOverride)}
-              className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-medium text-gray-500 hover:text-gray-800"
-            >
-              <span className="flex items-center gap-1.5">
-                <Terminal className="h-3 w-3 text-gray-400" />
-                <span>Advanced / Manual FID Override (Optional)</span>
-              </span>
-              <ChevronDown
-                className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
-                  showAdvancedOverride ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
-            {showAdvancedOverride && (
-              <div className="p-3 border-t border-gray-100 bg-white space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold text-gray-600">
-                    Custom FID or Username Override
-                  </label>
-                  <span className="text-[10px] text-gray-400">e.g. 432209 or @username</span>
-                </div>
-                <input
-                  type="text"
-                  value={usernameOrFid}
-                  onChange={(e) => {
-                    setUsernameOrFid(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder="Leave empty for 100% automatic resolution"
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-900 focus:bg-white focus:border-purple-500 outline-none transition-all font-mono"
-                />
-                <p className="text-[10px] text-gray-400">
-                  Only needed if testing on private nodes where automatic on-chain resolution is disabled.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Action Button */}

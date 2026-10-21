@@ -10,11 +10,11 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { mnemonic, usernameOrFid, fid, nodeUrl } = body;
+    const { mnemonic, nodeUrl } = body;
 
     if (!mnemonic?.trim()) {
       return NextResponse.json(
-        { status: 'error', error: 'Mnemonic seed phrase (12 or 24 words) is required' },
+        { status: 'error', error: 'Farcaster 24-word recovery phrase is required.' },
         { status: 400 }
       );
     }
@@ -23,60 +23,28 @@ export async function POST(request: Request) {
     const validation = validateMnemonic(cleanMnemonic);
     if (!validation.isValid) {
       return NextResponse.json(
-        { status: 'error', error: validation.error || 'Invalid mnemonic' },
+        { status: 'error', error: validation.error || 'Invalid recovery phrase.' },
         { status: 400 }
       );
     }
 
-    // 1. Derive Custody Account from seed phrase
+    // 1. Derive Custody Account from 24-word recovery phrase (m/44'/60'/0'/0/0)
     const custodyAccount = deriveCustodyFromMnemonic(cleanMnemonic);
     const custodyAddress = custodyAccount.address;
 
     const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
-    // 2. Resolve FID: Automatically from Custody Address, or via optional manual override
-    let userFid = 0;
-    let resolvedUsername = '';
+    // 2. Resolve FID accurately from the network (Node onChainIdRegistryEvent + Optimism IdRegistry contract)
+    const userFid = await defaultNodeClient.resolveFidByCustodyAddress(custodyAddress, targetNodeUrl);
 
-    const identifierInput = (usernameOrFid || fid || '').trim();
-
-    if (identifierInput) {
-      const cleanInput = identifierInput.replace(/^@/, '');
-      const parsedNum = parseInt(cleanInput, 10);
-
-      if (!isNaN(parsedNum) && String(parsedNum) === cleanInput) {
-        // Direct numeric FID provided
-        userFid = parsedNum;
-      } else {
-        // Username provided - resolve via FName Registry on Snapchain node
-        const proof = await defaultNodeClient.lookupUsername(cleanInput, targetNodeUrl);
-        if (proof && proof.fid) {
-          userFid = proof.fid;
-          resolvedUsername = proof.name;
-        } else {
-          return NextResponse.json(
-            {
-              status: 'error',
-              error: `Could not find Farcaster account for username '@${cleanInput}' on the Snapchain node. Please verify spelling or enter your numeric FID.`,
-            },
-            { status: 404 }
-          );
-        }
-      }
-    } else {
-      // Automatic resolution from Custody Address (Warpcast standard flow)
-      const detectedFid = await defaultNodeClient.resolveFidByCustodyAddress(custodyAddress, targetNodeUrl);
-      if (detectedFid && detectedFid > 0) {
-        userFid = detectedFid;
-      } else {
-        return NextResponse.json(
-          {
-            status: 'error',
-            error: `No registered Farcaster account was found on the network for this custody address (${custodyAddress}). Make sure you are using your official 24-word Farcaster/Warpcast seed phrase, or create a Sandbox Dev Account for local testing.`,
-          },
-          { status: 404 }
-        );
-      }
+    if (!userFid || userFid <= 0) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: `No registered Farcaster account was found on the network for custody address (${custodyAddress}). Please verify that you entered your authentic 24-word Farcaster recovery phrase.`,
+        },
+        { status: 404 }
+      );
     }
 
     // 3. Issue Gasless Ed25519 Signer via EIP-712 from Custody Address
@@ -93,8 +61,8 @@ export async function POST(request: Request) {
     const nodeProfile = await defaultNodeClient.getUserProfile(userFid, targetNodeUrl);
     const profile = {
       fid: userFid,
-      username: nodeProfile.username || resolvedUsername || `user_${userFid}`,
-      displayName: nodeProfile.displayName || resolvedUsername || `FID ${userFid}`,
+      username: nodeProfile.username || `user_${userFid}`,
+      displayName: nodeProfile.displayName || `FID ${userFid}`,
       pfpUrl: nodeProfile.pfpUrl || `https://avatar.vercel.sh/${custodyAddress}`,
       bio: nodeProfile.bio || 'Farcaster user on Snapchain',
       custodyAddress,
