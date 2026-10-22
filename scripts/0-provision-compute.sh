@@ -85,7 +85,7 @@ REC_DISK_GB=1500      # Official full recommendation for archive retention
 # ------------------------------------------------------------------------------
 # 2. Hardware Inspection & Decoupled Matrix Evaluation
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[1/5] Inspecting System Hardware & Profile Classification...${NC}"
+echo -e "\n${CYAN}${BOLD}[1/6] Inspecting System Hardware & Profile Classification...${NC}"
 
 # Detect CPU cores
 CPUS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)
@@ -128,7 +128,7 @@ echo -e "  - Storage Bounds: Streaming Pipeline: ${BOLD}${MIN_DISK_GB} GB${NC} |
 # ------------------------------------------------------------------------------
 # 3. Network Ports Inspection
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[2/5] Inspecting Required Network Ports...${NC}"
+echo -e "\n${CYAN}${BOLD}[2/6] Inspecting Required Network Ports...${NC}"
 
 check_port_status() {
     local port="$1"
@@ -198,7 +198,7 @@ fi
 # ------------------------------------------------------------------------------
 # 4. Storage Analysis, Volume Selection & Disk Profile Classification
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[3/5] Analyzing Storage Volumes & Detecting Disk Medium...${NC}"
+echo -e "\n${CYAN}${BOLD}[3/6] Analyzing Storage Volumes & Detecting Disk Medium...${NC}"
 
 # Parse real block storage devices with >= MIN_DISK_GB (750 GB) free space
 ELIGIBLE_MOUNTS=()
@@ -402,9 +402,37 @@ $SUDO chmod 775 "$SELECTED_SNAPCHAIN_DIR"
 echo -e "  ${GREEN}✓ Target directory verified and writable:${NC} ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
 
 # ------------------------------------------------------------------------------
-# 5. Advanced Adaptive Memory & Swap Engineering (ZRAM vs Disk Swap)
+# 5. Interactive Observability & Metrics Stack Configuration
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[4/5] Configuring Memory Subsystem & Swap Architecture...${NC}"
+echo -e "\n${CYAN}${BOLD}[4/6] Configuring Observability & Monitoring Stack (Grafana/StatsD)...${NC}"
+echo -e "  The monitoring stack includes Grafana (Dashboard) and StatsD (Metrics Collector)."
+echo -e "  ${YELLOW}Notice: These services consume ~700 MB RAM, additional CPU cycles, and write"
+echo -e "  continuous time-series metrics to disk. They are NOT required for node operation.${NC}"
+
+if [ "$PROFILE_DISK" == "D1" ] || [ "$PROFILE_RAM" == "R1" ] || [ "$PROFILE_CPU" == "C1" ]; then
+    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${YELLOW}Disable Metrics (N)${NC} to protect CPU/RAM/Disk resources."
+    DEFAULT_METRICS="n"
+else
+    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${GREEN}Enable Metrics (Y)${NC} (host has sufficient resources)."
+    DEFAULT_METRICS="y"
+fi
+
+ENABLE_METRICS_CHOICE=$(prompt_user "Would you like to install and run the Metrics stack (Grafana/StatsD)? [y/N]: " "$DEFAULT_METRICS")
+case "$ENABLE_METRICS_CHOICE" in
+    [yY]|[yY][eE][sS])
+        METRICS_ACTIVE=true
+        echo -e "  ${GREEN}✓ Metrics stack enabled (Grafana mapped to port 3005).${NC}"
+        ;;
+    *)
+        METRICS_ACTIVE=false
+        echo -e "  ${GREEN}✓ Running in Lean Mode: Metrics disabled to preserve host resources.${NC}"
+        ;;
+esac
+
+# ------------------------------------------------------------------------------
+# 6. Advanced Adaptive Memory & Swap Engineering (ZRAM vs Disk Swap)
+# ------------------------------------------------------------------------------
+echo -e "\n${CYAN}${BOLD}[5/6] Configuring Memory Subsystem & Swap Architecture...${NC}"
 
 ZRAM_ACTIVE=false
 
@@ -453,9 +481,9 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 6. Granular Kernel & I/O Engine Tuning (Adaptive /etc/sysctl.d)
+# 7. Granular Kernel & I/O Engine Tuning (Adaptive /etc/sysctl.d)
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[5/5] Applying Adaptive Kernel & Storage Optimization...${NC}"
+echo -e "\n${CYAN}${BOLD}[6/6] Applying Adaptive Kernel & Storage Optimization...${NC}"
 
 # Base P2P network capabilities
 $SUDO sysctl -w fs.file-max=2097152 > /dev/null 2>&1 || true
@@ -564,21 +592,25 @@ if command -v ufw &> /dev/null; then
     $SUDO ufw allow 3382/tcp comment 'Snapchain Libp2p Gossip Mesh (TCP)' > /dev/null 2>&1 || true
     $SUDO ufw allow 3383/tcp comment 'Snapchain gRPC API' > /dev/null 2>&1 || true
     $SUDO ufw allow 3000/tcp comment 'Farcaster Web Client' > /dev/null 2>&1 || true
-    $SUDO ufw allow 3005/tcp comment 'Grafana Metrics Dashboard' > /dev/null 2>&1 || true
-    echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3005, 3381, 3382, 3383).${NC}"
+    if [ "$METRICS_ACTIVE" == "true" ]; then
+        $SUDO ufw allow 3005/tcp comment 'Grafana Metrics Dashboard' > /dev/null 2>&1 || true
+        echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3005, 3381, 3382, 3383).${NC}"
+    else
+        echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3381, 3382, 3383).${NC}"
+    fi
 else
     echo -e "    ${YELLOW}• UFW firewall not active. Ensure cloud security groups permit required ports.${NC}"
 fi
 
 # ------------------------------------------------------------------------------
-# 7. Persist System Matrix State Configuration
+# 8. Persist System Matrix State Configuration
 # ------------------------------------------------------------------------------
 $SUDO mkdir -p /etc/snapchain
 cat <<EOF | $SUDO tee /etc/snapchain/snapchain.conf > /dev/null
 # Farcaster Snapchain Node System Configuration
 # Generated by 0-provision-compute.sh (Decoupled Matrix Architecture)
 PROVISIONED=true
-PROVISION_VERSION="2.1.0"
+PROVISION_VERSION="2.2.0"
 PROVISION_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # Decoupled Hardware Matrix
@@ -589,6 +621,10 @@ DISK_TYPE="${DISK_TYPE}"
 CPU_CORES="${CPUS}"
 RAM_GB="${RAM_GB}"
 ZRAM_ACTIVE="${ZRAM_ACTIVE}"
+
+# Monitoring & Observability Stack
+ENABLE_METRICS="${METRICS_ACTIVE}"
+METRICS_ACTIVE="${METRICS_ACTIVE}"
 
 # Storage Bounds & Directory
 SNAPCHAIN_DATA_DIR="${SELECTED_SNAPCHAIN_DIR}"
@@ -609,11 +645,12 @@ echo -e "Matrix Configuration Summary:"
 echo -e "  - CPU Profile:     ${BOLD}[${PROFILE_CPU}]${NC} (${CPU_LABEL})"
 echo -e "  - RAM Profile:     ${BOLD}[${PROFILE_RAM}]${NC} (${RAM_LABEL})"
 echo -e "  - Disk Profile:    ${BOLD}[${PROFILE_DISK}]${NC} (${DISK_LABEL})"
+echo -e "  - Metrics Stack:   ${BOLD}$( [ "$METRICS_ACTIVE" == "true" ] && echo "Enabled (Grafana on port 3005)" || echo "Disabled (Lean Mode)" )${NC}"
 echo -e "  - Target Data Dir: ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
 echo -e "  - Configuration:   Saved to ${BOLD}/etc/snapchain/snapchain.conf${NC}\n"
 
 # ------------------------------------------------------------------------------
-# 8. Interactive Prompt to Execute Step (1)
+# 9. Interactive Prompt to Execute Step (1)
 # ------------------------------------------------------------------------------
 AUTO_STEP1=$(prompt_user "Would you like to automatically run Step (1) [Setup Snapchain Read Node] now? [Y/n]: " "y")
 

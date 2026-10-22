@@ -8,7 +8,7 @@
 # - ZERO 3rd-party API keys required (no Alchemy, Infura, or Neynar keys needed)
 # - Adaptive Matrix Architecture (Integrated with Step 0 hardware profiling)
 # - RAM-Assisted Concurrent Chunk Streaming Pipeline (Reduces peak disk usage from 1.4 TB to ~500 GB)
-# - Interactive Observability & Metrics Configurator (Optional StatsD / Grafana)
+# - Observability & Metrics Stack (Configured in Step 0)
 # - Accepts client writes via POST /v1/submitMessage & relays to validators via mempool gossip
 # ==============================================================================
 
@@ -126,32 +126,22 @@ echo -e "  - Storage Profile: ${BOLD}[${PROFILE_DISK}]${NC} (${DISK_TYPE} on ${S
 echo -e "  - Target Data Dir: ${BOLD}${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}${NC}\n"
 
 # ------------------------------------------------------------------------------
-# 2. Interactive Observability & Metrics Configuration
+# 2. Observability & Metrics Stack Configuration (Configured in Step 0)
 # ------------------------------------------------------------------------------
-echo -e "${CYAN}${BOLD}[Component Configuration] Monitoring & Observability Stack${NC}"
-echo -e "  The monitoring stack includes Grafana (Dashboard) and StatsD (Metrics Collector)."
-echo -e "  ${YELLOW}Notice: These services consume ~700 MB RAM, additional CPU cycles, and write"
-echo -e "  continuous time-series metrics to disk. They are NOT required for node operation.${NC}"
-
-if [ "$PROFILE_DISK" == "D1" ] || [ "$PROFILE_RAM" == "R1" ] || [ "$PROFILE_CPU" == "C1" ]; then
-    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${YELLOW}Disable Metrics (N)${NC} to protect CPU/RAM/Disk resources."
-    DEFAULT_METRICS="n"
-else
-    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${GREEN}Enable Metrics (Y)${NC} (host has sufficient resources)."
-    DEFAULT_METRICS="y"
+METRICS_ACTIVE="${METRICS_ACTIVE:-${ENABLE_METRICS:-false}}"
+if [ "$METRICS_ACTIVE" != "true" ] && [ "$METRICS_ACTIVE" != "false" ]; then
+    case "$METRICS_ACTIVE" in
+        [yY]|[yY][eE][sS]) METRICS_ACTIVE=true ;;
+        *) METRICS_ACTIVE=false ;;
+    esac
 fi
 
-ENABLE_METRICS=$(prompt_user "Would you like to install and run the Metrics stack (Grafana/StatsD)? [y/N]: " "$DEFAULT_METRICS")
-case "$ENABLE_METRICS" in
-    [yY]|[yY][eE][sS])
-        METRICS_ACTIVE=true
-        echo -e "  ${GREEN}✓ Metrics stack enabled (Grafana on port 3005).${NC}\n"
-        ;;
-    *)
-        METRICS_ACTIVE=false
-        echo -e "  ${GREEN}✓ Running in Lean Mode: Metrics disabled to preserve host resources.${NC}\n"
-        ;;
-esac
+echo -e "${CYAN}${BOLD}[Component Configuration] Monitoring & Observability Stack${NC}"
+if [ "$METRICS_ACTIVE" == "true" ]; then
+    echo -e "  ${GREEN}✓ Metrics stack enabled (Grafana on port 3005).${NC}\n"
+else
+    echo -e "  ${GREEN}✓ Running in Lean Mode: Metrics disabled to preserve host resources.${NC}\n"
+fi
 
 # ------------------------------------------------------------------------------
 # 3. Setup Target Directory & Pull Official Manifests
