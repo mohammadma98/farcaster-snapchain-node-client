@@ -431,7 +431,11 @@ for SHARD_ID in "${SHARDS[@]}"; do
         MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 80 ))
         [ "$MAX_BUFFERED_CHUNKS" -lt 4 ] && MAX_BUFFERED_CHUNKS=4
 
-        if [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
+        if [ "${SHM_AVAIL_MB:-0}" -ge 3000 ]; then
+            CONCURRENT_DOWNLOADS=8
+        elif [ "${SHM_AVAIL_MB:-0}" -ge 1500 ]; then
+            CONCURRENT_DOWNLOADS=6
+        elif [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
             CONCURRENT_DOWNLOADS=4
         else
             CONCURRENT_DOWNLOADS=3
@@ -444,11 +448,12 @@ for SHARD_ID in "${SHARDS[@]}"; do
         mkdir -p "$BUFFER_DIR"
     fi
 
-    # Multi-core accelerated decompression engine (pigz if present, fallback gzip)
+    # Multi-core accelerated decompression engine (pigz with 2x thread over-subscription, fallback gzip)
     CPU_CORES=$(nproc 2>/dev/null || echo 2)
+    PIGZ_THREADS=$(( CPU_CORES * 2 ))
     DECOMPRESS_BIN="gzip -dc"
     if command -v pigz &>/dev/null; then
-        DECOMPRESS_BIN="pigz -dc -p ${CPU_CORES}"
+        DECOMPRESS_BIN="pigz -dc -p ${PIGZ_THREADS}"
     fi
 
     PIPE_FIFO="/tmp/snapchain_pipe_${SHARD_ID}_$$.fifo"
