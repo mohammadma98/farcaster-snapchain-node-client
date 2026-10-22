@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { deriveCustodyFromMnemonic, validateMnemonic } from '@/lib/farcaster/crypto';
+import { deriveCustodyFromMnemonic, validateMnemonic, getEd25519KeyPairFromPrivateKey } from '@/lib/farcaster/crypto';
 import { GaslessSignerManager } from '@/lib/farcaster/gasless-signer';
 import { defaultNodeClient } from '@/lib/farcaster/node-client';
 import { feedStore } from '@/lib/farcaster/feed-store';
@@ -10,11 +10,56 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { mnemonic, nodeUrl } = body;
+    const { mnemonic, nodeUrl, signerPrivateKey, fid } = body;
+
+    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+
+    // Option A: Direct login with an already active / approved Ed25519 signer private key
+    if (!mnemonic?.trim() && signerPrivateKey?.trim() && fid) {
+      const cleanSignerKey = signerPrivateKey.trim();
+      const userFid = Number(fid);
+      const keyPair = getEd25519KeyPairFromPrivateKey(cleanSignerKey);
+
+      const nodeProfile = await defaultNodeClient.getUserProfile(userFid, targetNodeUrl);
+      const profile = {
+        fid: userFid,
+        username: nodeProfile.username || `user_${userFid}`,
+        displayName: nodeProfile.displayName || `FID ${userFid}`,
+        pfpUrl: nodeProfile.pfpUrl || `https://avatar.vercel.sh/${keyPair.publicKeyHex}`,
+        bio: nodeProfile.bio || 'Farcaster user on Snapchain',
+        custodyAddress: '0x',
+        followerCount: nodeProfile.followerCount,
+        followingCount: nodeProfile.followingCount,
+      };
+
+      feedStore.registerUser(profile);
+
+      const session: UserSession = {
+        fid: userFid,
+        username: profile.username,
+        displayName: profile.displayName,
+        pfpUrl: profile.pfpUrl,
+        custodyAddress: '0x',
+        activeSignerKey: keyPair.publicKeyHex,
+        signerPrivateKey: keyPair.privateKeyHex,
+        expiresAt: Math.floor(Date.now() / 1000) + 7776000,
+        isSandbox: false,
+        bio: profile.bio,
+        followerCount: profile.followerCount,
+        followingCount: profile.followingCount,
+      };
+
+      return NextResponse.json({
+        status: 'ok',
+        success: true,
+        user: session,
+        nodeGossipStatus: 'SIGNER_READY',
+      });
+    }
 
     if (!mnemonic?.trim()) {
       return NextResponse.json(
-        { status: 'error', error: 'Farcaster 24-word recovery phrase is required.' },
+        { status: 'error', error: 'Farcaster 24-word recovery phrase or existing active App Key is required.' },
         { status: 400 }
       );
     }
@@ -31,8 +76,6 @@ export async function POST(request: Request) {
     // 1. Derive Custody Account from 24-word recovery phrase (m/44'/60'/0'/0/0)
     const custodyAccount = deriveCustodyFromMnemonic(cleanMnemonic);
     const custodyAddress = custodyAccount.address;
-
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // 2. Resolve FID accurately from the network (Node onChainIdRegistryEvent + Optimism IdRegistry contract)
     const userFid = await defaultNodeClient.resolveFidByCustodyAddress(custodyAddress, targetNodeUrl);
@@ -52,9 +95,10 @@ export async function POST(request: Request) {
       fid: userFid,
       custodyPrivateKey: cleanMnemonic,
       nodeUrl: targetNodeUrl,
+      explicitSignerPrivateKey: signerPrivateKey?.trim(),
     });
 
-    // 4. Submit signed KEY_ADD to Snapchain node mempool
+    // 4. Submit signed KEY_ADD to Snapchain node mempool + validator network
     const nodeSubmission = await GaslessSignerManager.submitKeyAddToNode(targetNodeUrl, encodedBytes);
 
     // 5. Fetch authentic user profile from the node

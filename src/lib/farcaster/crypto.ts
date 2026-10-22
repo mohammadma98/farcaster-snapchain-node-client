@@ -104,6 +104,38 @@ export function generateEd25519KeyPair(): Ed25519KeyPair {
 }
 
 /**
+ * Derive a deterministic Ed25519 App Key from a mnemonic seed phrase.
+ * Consistent across user sessions without generating random ephemeral keys on every login.
+ */
+export function deriveDeterministicEd25519KeyPair(mnemonic: string, keyIndex = 0): Ed25519KeyPair {
+  const clean = mnemonic.trim().toLowerCase();
+  const seed = sha512(new TextEncoder().encode(`farcaster-snapchain-app-signer:${clean}:${keyIndex}`));
+  const privateKey = seed.slice(0, 32);
+  const publicKey = ed.getPublicKey(privateKey);
+  return {
+    privateKey,
+    publicKey,
+    privateKeyHex: bytesToHex(privateKey),
+    publicKeyHex: bytesToHex(publicKey),
+  };
+}
+
+/**
+ * Restore an Ed25519 keypair from an existing private key hex string (0x-prefixed or bare hex)
+ */
+export function getEd25519KeyPairFromPrivateKey(privateKeyHex: string): Ed25519KeyPair {
+  const cleanHex = privateKeyHex.trim().replace(/^0x/, '');
+  const privateKey = hexToBytes(`0x${cleanHex}`);
+  const publicKey = ed.getPublicKey(privateKey);
+  return {
+    privateKey,
+    publicKey,
+    privateKeyHex: `0x${cleanHex}`,
+    publicKeyHex: bytesToHex(publicKey),
+  };
+}
+
+/**
  * Sign arbitrary data with an Ed25519 private key
  */
 export function signWithEd25519(messageBytes: Uint8Array, privateKey: Uint8Array): Uint8Array {

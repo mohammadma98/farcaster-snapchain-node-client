@@ -19,7 +19,10 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps) {
+  const [authMode, setAuthMode] = useState<'mnemonic' | 'signerKey'>('mnemonic');
   const [mnemonic, setMnemonic] = useState('');
+  const [explicitSignerKey, setExplicitSignerKey] = useState('');
+  const [manualFid, setManualFid] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +36,11 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setMnemonic(text.trim());
+        if (authMode === 'mnemonic') {
+          setMnemonic(text.trim());
+        } else {
+          setExplicitSignerKey(text.trim());
+        }
         setError(null);
       }
     } catch {
@@ -43,6 +50,45 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (authMode === 'signerKey') {
+      if (!explicitSignerKey.trim()) {
+        setError('Please enter your Ed25519 Signer Private Key.');
+        return;
+      }
+      if (!manualFid.trim() || isNaN(Number(manualFid.trim()))) {
+        setError('Please enter your valid numeric Farcaster ID (FID).');
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fid: Number(manualFid.trim()),
+            signerPrivateKey: explicitSignerKey.trim(),
+            nodeUrl,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.status !== 'ok') {
+          throw new Error(data.error || 'Failed to authenticate with Signer Key');
+        }
+
+        onLoginSuccess(data.user);
+      } catch (err: any) {
+        setError(err.message || 'Login error occurred');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (!mnemonic.trim()) {
       setError('Please enter your 24-word Farcaster recovery phrase.');
       return;
@@ -61,6 +107,7 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mnemonic: mnemonic.trim(),
+          signerPrivateKey: explicitSignerKey.trim() || undefined,
           nodeUrl,
         }),
       });
@@ -123,92 +170,180 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
           </div>
         )}
 
-        {/* Form: 100% Pure Farcaster Standard (24-word recovery phrase, auto-detected on-chain FID) */}
+        {/* Authentication Mode Tabs */}
+        <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold text-slate-600">
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode('mnemonic');
+              setError(null);
+            }}
+            className={`py-2 px-3 rounded-lg transition-all ${
+              authMode === 'mnemonic'
+                ? 'bg-white text-purple-700 shadow-xs'
+                : 'hover:text-slate-900'
+            }`}
+          >
+            24-Word Phrase
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode('signerKey');
+              setError(null);
+            }}
+            className={`py-2 px-3 rounded-lg transition-all ${
+              authMode === 'signerKey'
+                ? 'bg-white text-purple-700 shadow-xs'
+                : 'hover:text-slate-900'
+            }`}
+          >
+            Active App Key
+          </button>
+        </div>
+
+        {/* Form: Pure Farcaster Standard or Direct App Key */}
         <form onSubmit={handleLogin} className="space-y-4">
-          {/* Mnemonic Textarea */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-gray-700">
-                24-Word Recovery Phrase (Farcaster Mnemonic)
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePaste}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-600 hover:text-purple-700"
-                >
-                  <Clipboard className="h-3 w-3" />
-                  <span>Paste</span>
-                </button>
-                {mnemonic && (
+          {authMode === 'mnemonic' ? (
+            /* Mnemonic Mode */
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-700">
+                  24-Word Recovery Phrase (Farcaster Mnemonic)
+                </label>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setMnemonic('')}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-gray-600"
+                    onClick={handlePaste}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-600 hover:text-purple-700"
                   >
-                    Clear
+                    <Clipboard className="h-3 w-3" />
+                    <span>Paste</span>
                   </button>
-                )}
+                  {mnemonic && (
+                    <button
+                      type="button"
+                      onClick={() => setMnemonic('')}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-gray-600"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="relative">
+                <textarea
+                  value={mnemonic}
+                  onChange={(e) => {
+                    setMnemonic(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24"
+                  rows={3}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  className={`w-full rounded-xl border p-3 text-xs font-mono transition-all resize-none outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 ${
+                    wordCount > 0 && !isWordCountValid
+                      ? 'border-amber-300 bg-amber-50/30'
+                      : 'border-gray-200 bg-gray-50 focus:bg-white'
+                  }`}
+                />
+              </div>
+
+              {/* Word count and Auto-detection indicator */}
+              <div className="flex items-center justify-between text-[11px] text-gray-500">
+                <span>Standard: 24 words (Warpcast / BIP-39)</span>
+                <span
+                  className={`font-semibold ${
+                    wordCount === 24
+                      ? 'text-emerald-600'
+                      : wordCount === 12
+                      ? 'text-indigo-600'
+                      : wordCount > 0
+                      ? 'text-amber-600'
+                      : 'text-gray-400'
+                  }`}
+                >
+                  {wordCount} words {wordCount === 24 ? '(Valid 24-Word Standard)' : wordCount === 12 ? '(12-Word Legacy)' : 'detected'}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 leading-tight">
+                Your FID and deterministic gasless App Key are automatically resolved and authorized via EIP-712.
+              </p>
+            </div>
+          ) : (
+            /* Signer Key Mode */
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-700">
+                  Numeric Farcaster ID (FID)
+                </label>
+                <input
+                  type="number"
+                  value={manualFid}
+                  onChange={(e) => {
+                    setManualFid(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="e.g. 432209"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 focus:bg-white p-2.5 text-xs font-mono outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-gray-700">
+                    Ed25519 Signer Private Key (64-char Hex)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handlePaste}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-600 hover:text-purple-700"
+                  >
+                    <Clipboard className="h-3 w-3" />
+                    <span>Paste</span>
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  value={explicitSignerKey}
+                  onChange={(e) => {
+                    setExplicitSignerKey(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="0x..."
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 focus:bg-white p-2.5 text-xs font-mono outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                />
+                <p className="text-[11px] text-gray-500 leading-tight">
+                  Enter an approved App Key from Warpcast, developer portal, or an existing session.
+                </p>
               </div>
             </div>
-
-            <div className="relative">
-              <textarea
-                value={mnemonic}
-                onChange={(e) => {
-                  setMnemonic(e.target.value);
-                  setError(null);
-                }}
-                placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24"
-                rows={3}
-                spellCheck={false}
-                autoComplete="off"
-                autoCorrect="off"
-                className={`w-full rounded-xl border p-3 text-xs font-mono transition-all resize-none outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 ${
-                  wordCount > 0 && !isWordCountValid
-                    ? 'border-amber-300 bg-amber-50/30'
-                    : 'border-gray-200 bg-gray-50 focus:bg-white'
-                }`}
-              />
-            </div>
-
-            {/* Word count and Auto-detection indicator */}
-            <div className="flex items-center justify-between text-[11px] text-gray-500">
-              <span>Standard: 24 words (Warpcast / BIP-39)</span>
-              <span
-                className={`font-semibold ${
-                  wordCount === 24
-                    ? 'text-emerald-600'
-                    : wordCount === 12
-                    ? 'text-indigo-600'
-                    : wordCount > 0
-                    ? 'text-amber-600'
-                    : 'text-gray-400'
-                }`}
-              >
-                {wordCount} words {wordCount === 24 ? '(Valid 24-Word Standard)' : wordCount === 12 ? '(12-Word Legacy)' : 'detected'}
-              </span>
-            </div>
-            <p className="text-[11px] text-gray-500 leading-tight">
-              Your FID, username, and profile are automatically detected from the blockchain and your Snapchain node.
-            </p>
-          </div>
+          )}
 
           {/* Action Button */}
           <button
             type="submit"
-            disabled={isLoading || !mnemonic.trim()}
+            disabled={isLoading || (authMode === 'mnemonic' ? !mnemonic.trim() : !explicitSignerKey.trim() || !manualFid.trim())}
             className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-semibold py-3 px-4 text-xs shadow-md shadow-purple-600/20 transition-all disabled:opacity-50"
           >
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Detecting FID & Issuing Gasless Signer via EIP-712...</span>
+                <span>
+                  {authMode === 'mnemonic'
+                    ? 'Detecting FID & Issuing Gasless Signer via EIP-712...'
+                    : 'Validating Signer & Connecting to Node...'}
+                </span>
               </>
             ) : (
               <>
                 <Lock className="h-3.5 w-3.5" />
-                <span>Log In with Recovery Phrase</span>
+                <span>
+                  {authMode === 'mnemonic' ? 'Log In with Recovery Phrase' : 'Connect with Active App Key'}
+                </span>
                 <ArrowRight className="h-3.5 w-3.5 ml-1" />
               </>
             )}

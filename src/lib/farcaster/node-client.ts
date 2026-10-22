@@ -1017,63 +1017,70 @@ export class SnapchainNodeClient {
    * Submit raw protobuf bytes to the node's /v1/submitMessage
    * Uses 25-second timeout and Buffer payload for rock-solid Node.js binary transmission.
    */
+  /**
+   * Submit raw protobuf bytes to the node's /v1/submitMessage
+   * Employs local read-node submission with resilient network coordinator fallback
+   * to guarantee uninterrupted message ingestion even when the local read node is catching up on historical sync.
+   */
   private async submitMessageProtobuf(
     encodedBytes: Uint8Array,
     nodeUrl: string
   ): Promise<{ success: boolean; hash?: string; error?: string }> {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const bufferPayload = Buffer.from(
+      encodedBytes.buffer,
+      encodedBytes.byteOffset,
+      encodedBytes.byteLength
+    );
 
-    try {
-      const bufferPayload = Buffer.from(
-        encodedBytes.buffer,
-        encodedBytes.byteOffset,
-        encodedBytes.byteLength
-      );
-
-      const response = await fetch(`${cleanUrl}/v1/submitMessage`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': String(bufferPayload.length),
-        },
-        body: bufferPayload as any,
-        signal: AbortSignal.timeout(25000), // 25s timeout for RocksDB & mempool validation
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        return {
-          success: false,
-          error: `Snapchain node rejected message (${response.status}): ${text}`,
-        };
-      }
-
-      const result = await response.json().catch(() => ({}));
-      const hash = result.hash
-        ? typeof result.hash === 'string'
-          ? result.hash
-          : bytesToHexString(result.hash)._unsafeUnwrap()
-        : undefined;
-
-      return { success: true, hash };
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-        return {
-          success: false,
-          error: `Connection to Snapchain read node (${cleanUrl}/v1/submitMessage) timed out after 25s. Please verify your local node is running and syncing on port 3381.`,
-        };
-      }
-      if (err.cause?.code === 'ECONNREFUSED' || err.code === 'ECONNREFUSED') {
-        return {
-          success: false,
-          error: `Connection refused by node at ${cleanUrl}. Please ensure your Snapchain read node container is active and listening on port 3381.`,
-        };
-      }
-      return {
-        success: false,
-        error: err.message || 'Network submission error contacting Snapchain node',
-      };
+    // Primary target: local read node
+    // Secondary target: canonical network validator coordinator
+    const targetNodes = [cleanUrl];
+    if (cleanUrl !== 'https://iris.farcaster.xyz:3381' && cleanUrl !== 'http://iris.farcaster.xyz:3381') {
+      targetNodes.push('https://iris.farcaster.xyz:3381');
     }
+
+    let lastError = '';
+
+    for (const target of targetNodes) {
+      try {
+        const response = await fetch(`${target}/v1/submitMessage`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(bufferPayload.length),
+          },
+          body: bufferPayload as any,
+          signal: AbortSignal.timeout(20000), // 20s timeout
+        });
+
+        if (response.ok) {
+          const result = await response.json().catch(() => ({}));
+          const hash = result.hash
+            ? typeof result.hash === 'string'
+              ? result.hash
+              : bytesToHexString(result.hash)._unsafeUnwrap()
+            : undefined;
+
+          return { success: true, hash };
+        }
+
+        const text = await response.text();
+        lastError = `Snapchain node (${target}) rejected message (${response.status}): ${text}`;
+
+        // If error is not a signer/sync error (e.g. malformed payload), don't bother falling back
+        if (!text.includes('invalid signer') && !text.includes('validation_failure') && response.status !== 502 && response.status !== 503) {
+          return { success: false, error: lastError };
+        }
+      } catch (err: any) {
+        lastError = err.message || `Error submitting to ${target}`;
+      }
+    }
+
+    return {
+      success: false,
+      error: lastError || 'All node endpoints rejected the message submission',
+    };
   }
 }
 
