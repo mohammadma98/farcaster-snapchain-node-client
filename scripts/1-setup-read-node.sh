@@ -186,6 +186,7 @@ rm -f .write_test 2>/dev/null || true
 # Clean up broken directory artifacts if created by Docker volume mounts
 [ -d "snapchain.sh" ] && rm -rf "snapchain.sh" 2>/dev/null || true
 [ -d "docker-compose.yml" ] && rm -rf "docker-compose.yml" 2>/dev/null || true
+[ -d "validators.toml" ] && rm -rf "validators.toml" 2>/dev/null || true
 
 echo -e "${YELLOW}[1/4] Pulling node manifests & management scripts...${NC}"
 curl -fsSL -o snapchain.sh https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/scripts/snapchain.sh
