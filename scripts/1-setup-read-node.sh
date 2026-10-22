@@ -291,14 +291,12 @@ echo -e "\n${YELLOW}[3/4] Evaluating Database State & Initializing Snapshot Pipe
 
 mkdir -p "${SNAPCHAIN_DIR}/.rocks"
 
-# Check if all shards (0, 1, 2) are already fully materialized on disk
+# Check if all shards (0, 1, 2) are already fully materialized and verified on disk
 ALL_SHARDS_DONE=true
 for s in 0 1 2; do
     s_dir="${SNAPCHAIN_DIR}/.rocks/shard-${s}"
-    s_bytes=$(du -sb "$s_dir" 2>/dev/null | awk '{print $1}' || echo 0)
-    if [ "$s" -eq 0 ] && [ "$s_bytes" -le 10737418240 ]; then
-        ALL_SHARDS_DONE=false
-    elif [ "$s" -ne 0 ] && [ "$s_bytes" -le 107374182400 ]; then
+    s_done="${SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete"
+    if [ ! -f "$s_done" ] || [ ! -d "$s_dir" ]; then
         ALL_SHARDS_DONE=false
     fi
 done
@@ -473,21 +471,19 @@ trap cleanup_resources TERM
 
 for SHARD_ID in "${SHARDS[@]}"; do
     SHARD_DIR="${SNAPCHAIN_DIR}/.rocks/shard-${SHARD_ID}"
+    SHARD_COMPLETE_FILE="${SNAPCHAIN_DIR}/.rocks/.shard_${SHARD_ID}.complete"
     SHARD_BYTES=0
     if [ -d "$SHARD_DIR" ]; then
         SHARD_BYTES=$(du -sb "$SHARD_DIR" 2>/dev/null | awk '{print $1}' || echo 0)
     fi
 
-    # Check if this specific shard is already bootstrapped (Shard 0: >10GB, Shards 1&2: >100GB)
-    if [ "$SHARD_ID" -eq 0 ] && [ "$SHARD_BYTES" -gt 10737418240 ]; then
-        update_status "  ${GREEN}✓ Shard 0 already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}"
+    # Deterministic Shard Verification: only skip if full extraction completed and verified
+    if [ -f "$SHARD_COMPLETE_FILE" ] && [ -d "$SHARD_DIR" ] && [ "$SHARD_BYTES" -gt 1000000 ]; then
+        update_status "  ${GREEN}✓ Shard ${SHARD_ID} already verified and materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}"
         continue
-    elif [ "$SHARD_ID" -ne 0 ] && [ "$SHARD_BYTES" -gt 107374182400 ]; then
-        update_status "  ${GREEN}✓ Shard ${SHARD_ID} already materialized ($(format_bytes "$SHARD_BYTES")). Skipping.${NC}"
-        continue
-    elif [ "$SHARD_BYTES" -gt 0 ]; then
-        update_status "  ${YELLOW}Notice: Cleaning up incomplete Shard ${SHARD_ID} state ($(format_bytes "$SHARD_BYTES"))...${NC}"
-        rm -rf "$SHARD_DIR"
+    elif [ "$SHARD_BYTES" -gt 0 ] || [ -d "$SHARD_DIR" ]; then
+        update_status "  ${YELLOW}Notice: Cleaning up unverified/incomplete Shard ${SHARD_ID} state ($(format_bytes "$SHARD_BYTES"))...${NC}"
+        rm -rf "$SHARD_DIR" "$SHARD_COMPLETE_FILE" 2>/dev/null || true
     fi
 
     SHARD_META_URL="${R2_PUBLIC_BASE}/${NETWORK_NAME}/${SHARD_ID}/latest.json"
@@ -505,6 +501,9 @@ for SHARD_ID in "${SHARDS[@]}"; do
         continue
     fi
 
+    # Purge any leftover RAM/disk buffers from earlier aborted shards
+    rm -rf /dev/shm/snapchain_shard_* /run/shm/snapchain_shard_* /tmp/snapchain_pipe_* /tmp/snapchain_shard_* 2>/dev/null || true
+
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
     if [ ! -d /dev/shm ] || [ "${SHM_AVAIL_MB:-0}" -lt 200 ]; then
@@ -516,9 +515,9 @@ for SHARD_ID in "${SHARDS[@]}"; do
     fi
     mkdir -p "$BUFFER_DIR"
 
-    # Multi-Core Adaptive Extraction Worker Pool (2 * CPU_CORES)
+    # Multi-Core Adaptive Extraction Worker Pool (Adaptive 2-4 workers; disk tar injection is the bound)
     CPU_CORES=$(nproc 2>/dev/null || echo 1)
-    MAX_EXT_WORKERS=$(( CPU_CORES * 2 ))
+    MAX_EXT_WORKERS=$(( CPU_CORES > 4 ? 4 : CPU_CORES ))
     if [ "$MAX_EXT_WORKERS" -lt 2 ]; then MAX_EXT_WORKERS=2; fi
 
     # Network Ingestion Concurrency
@@ -530,9 +529,19 @@ for SHARD_ID in "${SHARDS[@]}"; do
         DECOMPRESS_BIN="pigz -dc -p 1"
     fi
 
-    # Dynamic RAM Headroom Thresholds (Never write to disk; pause on memory saturation)
-    MIN_FREE_RAM_MB=350
-    RESUME_FREE_RAM_MB=550
+    # Dynamic Bounded Sliding Window Horizons (Keeps in-RAM memory strictly under ~900 MB)
+    SHM_TOTAL_MB=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $2}' | tr -d 'M' || echo 1024)
+    if [ "${SHM_TOTAL_MB:-1024}" -lt 1500 ]; then
+        MIN_FREE_RAM_MB=200
+        RESUME_FREE_RAM_MB=350
+        MAX_DL_LOOKAHEAD=3
+        MAX_RAW_LOOKAHEAD=2
+    else
+        MIN_FREE_RAM_MB=500
+        RESUME_FREE_RAM_MB=800
+        MAX_DL_LOOKAHEAD=6
+        MAX_RAW_LOOKAHEAD=3
+    fi
 
     get_free_shm_mb() {
         local shm_free
@@ -573,7 +582,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
     : > "${BUFFER_DIR}/.ext_stats"
     : > "${BUFFER_DIR}/.pipe_stats"
 
-    # Stage 1: Network Ingestion Worker into RAM
+    # Stage 1: Resilient Network Ingestion Worker into RAM
     download_chunk() {
         local idx="$1"
         local chunk_name="$2"
@@ -583,23 +592,32 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
         touch "${BUFFER_DIR}/.dl_active_${idx}"
 
-        if ! curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${comp_file}.tmp"; then
-            rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
-            echo "[ERROR] Download failed for chunk ${chunk_name}" >> "$LOG_FILE"
-            touch "${BUFFER_DIR}/.err_${idx}"
-            return 1
-        fi
+        local attempt=0
+        while [ "$attempt" -lt 3 ]; do
+            attempt=$(( attempt + 1 ))
+            rm -f "${comp_file}.tmp" 2>/dev/null || true
+            if curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 -m 90 "$chunk_url" -o "${comp_file}.tmp" && [ -s "${comp_file}.tmp" ]; then
+                mv -f "${comp_file}.tmp" "$comp_file"
+                stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
+                rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+                touch "${BUFFER_DIR}/.dl_done_${idx}"
+                return 0
+            fi
+            sleep 2
+        done
 
-        mv -f "${comp_file}.tmp" "$comp_file"
-        stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
-        rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
-        touch "${BUFFER_DIR}/.dl_done_${idx}"
-        return 0
+        rm -f "${comp_file}.tmp" "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+        echo "[ERROR] Download failed for chunk ${chunk_name} after 3 attempts" >> "$LOG_FILE"
+        touch "${BUFFER_DIR}/.err_${idx}"
+        return 1
     }
 
     refill_download_queue() {
-        local curr_consume_idx=$1
-        while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
+        local curr_consume_idx="${1:-0}"
+        local max_dl_horizon=$(( curr_consume_idx + MAX_DL_LOOKAHEAD ))
+        if [ "$max_dl_horizon" -gt "$TOTAL_CHUNKS" ]; then max_dl_horizon="$TOTAL_CHUNKS"; fi
+
+        while [ "$NEXT_DOWNLOAD_IDX" -lt "$max_dl_horizon" ]; do
             # Dynamic RAM Backpressure Check: Never spill over to disk; pause if RAM headroom is low
             local free_mb
             free_mb=$(get_free_shm_mb)
@@ -639,7 +657,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         done
     }
 
-    # Stage 2: Independent Extraction Worker Pool (2 * CPU_CORES workers in RAM)
+    # Stage 2: Independent Extraction Worker Pool in RAM
     extract_chunk() {
         local idx="$1"
         local chunk_name="${CHUNK_ARRAY[idx]}"
@@ -650,6 +668,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         local t_start
         t_start=$(date +%s%3N 2>/dev/null || date +%s)
 
+        rm -f "${raw_file}.tmp" 2>/dev/null || true
         if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
             local t_end
             t_end=$(date +%s%3N 2>/dev/null || date +%s)
@@ -664,11 +683,15 @@ for SHARD_ID in "${SHARDS[@]}"; do
         else
             rm -f "${raw_file}.tmp" 2>/dev/null || true
             rm -f "${BUFFER_DIR}/.ext_active_${idx}" 2>/dev/null || true
+            echo "[ERROR] Decompression failed for chunk ${chunk_name}" >> "$LOG_FILE"
+            touch "${BUFFER_DIR}/.ext_err_${idx}"
         fi
         return 0
     }
 
     dispatch_extraction_workers() {
+        local curr_consume_idx="${1:-0}"
+
         # Purge completed extraction workers from table
         local active_ext=0
         for e_idx in "${!EXT_PIDS[@]}"; do
@@ -680,9 +703,13 @@ for SHARD_ID in "${SHARDS[@]}"; do
             fi
         done
 
-        # Dispatch ready chunks between dispatch pointer and downloaded horizon
+        # Bound extraction lookahead: do not exceed curr_consume_idx + MAX_RAW_LOOKAHEAD
+        local max_ext_horizon=$(( curr_consume_idx + MAX_RAW_LOOKAHEAD ))
+        if [ "$max_ext_horizon" -gt "$TOTAL_CHUNKS" ]; then max_ext_horizon="$TOTAL_CHUNKS"; fi
+
+        # Dispatch ready chunks between dispatch pointer and extraction horizon
         local scan_idx="$NEXT_EXT_DISPATCH_IDX"
-        while [ "$active_ext" -lt "$MAX_EXT_WORKERS" ] && [ "$scan_idx" -lt "$NEXT_DOWNLOAD_IDX" ]; do
+        while [ "$active_ext" -lt "$MAX_EXT_WORKERS" ] && [ "$scan_idx" -lt "$max_ext_horizon" ] && [ "$scan_idx" -lt "$NEXT_DOWNLOAD_IDX" ]; do
             if [ -f "${BUFFER_DIR}/.dl_done_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${scan_idx}" ]; then
                 extract_chunk "$scan_idx" &
                 EXT_PIDS["$scan_idx"]=$!
@@ -939,7 +966,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
     METRICS_PID=$!
 
     refill_download_queue 0
-    dispatch_extraction_workers
+    dispatch_extraction_workers 0
 
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
         CURRENT_CHUNK="${CHUNK_ARRAY[i]}"
@@ -949,10 +976,16 @@ for SHARD_ID in "${SHARDS[@]}"; do
         # Coordinate downloads and extractions until chunk i is extracted in RAM
         while [ ! -f "${BUFFER_DIR}/.ext_done_${i}" ]; do
             refill_download_queue "$i"
-            dispatch_extraction_workers
+            dispatch_extraction_workers "$i"
 
             if [ -f "${BUFFER_DIR}/.err_${i}" ]; then
                 echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
+                echo "ERROR" > "$DONE_FILE"
+                cleanup_resources
+                exit 1
+            fi
+            if [ -f "${BUFFER_DIR}/.ext_err_${i}" ]; then
+                echo "[ERROR] Decompression failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
                 echo "ERROR" > "$DONE_FILE"
                 cleanup_resources
                 exit 1
@@ -971,7 +1004,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         done
 
         refill_download_queue "$i"
-        dispatch_extraction_workers
+        dispatch_extraction_workers "$i"
 
         CHUNK_SIZE=$(cat "${BUFFER_DIR}/.size_${i}" 2>/dev/null || echo 70209256)
         rm -f "${BUFFER_DIR}/.size_${i}" 2>/dev/null || true
@@ -1053,7 +1086,8 @@ for SHARD_ID in "${SHARDS[@]}"; do
     rm -f "$PIPE_FIFO" 2>/dev/null || true
     rm -rf "$BUFFER_DIR" 2>/dev/null || true
 
-    update_status "  ${GREEN}✓ Shard [${SHARD_ID}/${NUM_SHARDS}] materialized successfully!${NC}"
+    touch "${SNAPCHAIN_DIR}/.rocks/.shard_${SHARD_ID}.complete"
+    update_status "  ${GREEN}✓ Shard [${SHARD_ID}/${NUM_SHARDS}] materialized and verified successfully!${NC}"
 done
 
 echo "SUCCESS" > "$DONE_FILE"
