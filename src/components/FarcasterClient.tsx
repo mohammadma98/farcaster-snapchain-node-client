@@ -28,10 +28,52 @@ import {
   UserCheck,
   AlertCircle,
   Copy,
+  ChevronDown,
+  Server,
+  Filter,
+  Plus,
 } from 'lucide-react';
 import { FarcasterCast, FarcasterUser, UserSession } from '@/lib/farcaster/types';
 import { LoginPage } from './LoginPage';
 import { FarcasterAvatar } from './FarcasterAvatar';
+import { QuoteCastCard } from './QuoteCastCard';
+import { CastMediaPreviews, FormattedCastText } from './LinkPreview';
+
+interface SnapchainNodePreset {
+  id: string;
+  name: string;
+  url: string;
+  badge: string;
+  isPersonal?: boolean;
+}
+
+const PRESET_NODES: SnapchainNodePreset[] = [
+  {
+    id: 'personal',
+    name: "Mohammad's Sovereign Node",
+    url: 'http://162.35.98.172:3381',
+    badge: '162.35.98.172',
+    isPersonal: true,
+  },
+  {
+    id: 'local',
+    name: 'Local Snapchain Node',
+    url: 'http://127.0.0.1:3381',
+    badge: 'localhost:3381',
+  },
+];
+
+const KNOWN_SOURCES = [
+  { id: 'all', label: 'All Clients / Sources' },
+  { id: 'Direct Snapchain', label: 'Direct Snapchain' },
+  { id: 'Warpcast', label: 'Warpcast' },
+  { id: 'Supercast', label: 'Supercast' },
+  { id: 'Phaver', label: 'Phaver' },
+  { id: 'Paragraph', label: 'Paragraph' },
+  { id: 'Bountycaster', label: 'Bountycaster' },
+  { id: 'Herocast', label: 'Herocast' },
+  { id: 'Jam', label: 'Jam' },
+];
 
 const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
   {
@@ -115,7 +157,15 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Node Connectivity
-  const [nodeUrl, setNodeUrl] = useState('http://127.0.0.1:3381');
+  const [nodeUrl, setNodeUrl] = useState('http://162.35.98.172:3381');
+  const [isNodeDropdownOpen, setIsNodeDropdownOpen] = useState(false);
+  const [customNodes, setCustomNodes] = useState<Array<{ name: string; url: string }>>([]);
+  const [newCustomNodeUrl, setNewCustomNodeUrl] = useState('');
+  const [isAddingCustomNode, setIsAddingCustomNode] = useState(false);
+
+  // Client Source Filter Dropdown
+  const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
+
   const [nodeHealth, setNodeHealth] = useState<{
     isOnline: boolean;
     latencyMs: number;
@@ -161,6 +211,25 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>(DEFAULT_SUGGESTED_USERS);
   const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([37, 432209]));
 
+  // Dynamic Client Sources Filter calculation
+  const castSources = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of casts) {
+      if (c.clientSource) {
+        counts[c.clientSource] = (counts[c.clientSource] || 0) + 1;
+      }
+    }
+    const allIds = Array.from(new Set([...KNOWN_SOURCES.map((k) => k.id), ...Object.keys(counts)]));
+    return allIds.map((id) => {
+      const known = KNOWN_SOURCES.find((k) => k.id === id);
+      return {
+        id,
+        label: known ? known.label : id,
+        count: id === 'all' ? casts.length : counts[id] || 0,
+      };
+    });
+  }, [casts]);
+
   // Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -179,13 +248,57 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
-  // Fetch accounts followed by user
+  // Node switcher handlers
+  const handleSelectNode = (url: string) => {
+    updateNodeUrl(url);
+    setIsNodeDropdownOpen(false);
+    pingNode(url);
+    fetchFeed(sourceFilter, feedMode, session?.fid, undefined, url);
+    showToast(`Connected to node: ${url}`);
+  };
+
+  const handleAddCustomNode = () => {
+    if (!newCustomNodeUrl.trim()) return;
+    let url = newCustomNodeUrl.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `http://${url}`;
+    }
+    try {
+      const parsed = new URL(url);
+      const name = `Custom (${parsed.hostname})`;
+      const updated = [...customNodes.filter((n) => n.url !== url), { name, url }];
+      setCustomNodes(updated);
+      try {
+        localStorage.setItem('farcaster_custom_nodes', JSON.stringify(updated));
+      } catch {}
+      setNewCustomNodeUrl('');
+      setIsAddingCustomNode(false);
+      handleSelectNode(url);
+    } catch {
+      showToast('Please enter a valid node URL');
+    }
+  };
+
+  // Fetch accounts followed by user with localStorage caching
   const fetchFollows = useCallback(async (fid: number, targetNode = nodeUrl) => {
     try {
       const res = await fetch(`/api/links?fid=${fid}&nodeUrl=${encodeURIComponent(targetNode)}`);
       const data = await res.json();
-      if (Array.isArray(data.following)) {
-        setFollowedFids(new Set(data.following));
+      if (Array.isArray(data.following) && data.following.length > 0) {
+        const nextSet = new Set<number>(data.following);
+        setFollowedFids(nextSet);
+        try {
+          localStorage.setItem(
+            `farcaster_following_${fid}`,
+            JSON.stringify({
+              fids: data.following,
+              count: data.following.length,
+              timestamp: Date.now(),
+            })
+          );
+        } catch {
+          // ignore
+        }
       }
     } catch {
       // ignore
@@ -197,17 +310,25 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     async (
       filter = sourceFilter,
       mode = feedMode,
-      explicitViewerFid = session?.fid
+      explicitViewerFid = session?.fid,
+      overrideFollowedFids?: Set<number>,
+      overrideNodeUrl?: string
     ) => {
       setIsLoadingFeed(true);
       try {
         const effectiveMode = explicitViewerFid ? mode : 'global';
+        const activeFollows = overrideFollowedFids || followedFids;
         const viewerParam =
           explicitViewerFid && effectiveMode === 'following'
             ? `&viewerFid=${explicitViewerFid}`
             : '';
         const modeParam = `&mode=${effectiveMode}`;
-        const url = `/api/feed?source=${encodeURIComponent(filter)}${viewerParam}${modeParam}&nodeUrl=${encodeURIComponent(nodeUrl)}`;
+        const followsParam =
+          effectiveMode === 'following' && activeFollows.size > 0
+            ? `&followedFids=${Array.from(activeFollows).join(',')}`
+            : '';
+        const targetNode = overrideNodeUrl || nodeUrl;
+        const url = `/api/feed?source=${encodeURIComponent(filter)}${viewerParam}${modeParam}${followsParam}&nodeUrl=${encodeURIComponent(targetNode)}`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.casts) {
@@ -219,18 +340,28 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setIsLoadingFeed(false);
       }
     },
-    [nodeUrl, sourceFilter, session?.fid, feedMode]
+    [nodeUrl, sourceFilter, session?.fid, feedMode, followedFids]
   );
 
   // 1. Initial Load & Restore Session
   useEffect(() => {
     let initialViewerFid: number | undefined;
+    let initialFollowsSet: Set<number> | undefined;
+
     try {
       const saved = localStorage.getItem('farcaster_session');
       const savedNode = localStorage.getItem('farcaster_node_url');
       if (savedNode) {
         setNodeUrl(savedNode);
       }
+
+      const savedCustom = localStorage.getItem('farcaster_custom_nodes');
+      if (savedCustom) {
+        try {
+          setCustomNodes(JSON.parse(savedCustom));
+        } catch {}
+      }
+
       if (saved) {
         const parsed: UserSession = JSON.parse(saved);
         if (
@@ -245,10 +376,24 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setSession(parsed);
         setFeedMode('following');
         initialViewerFid = parsed.fid;
-        fetchFollows(parsed.fid, savedNode || nodeUrl);
+
+        // Restore cached following list immediately from localStorage
+        try {
+          const cachedFollowsRaw = localStorage.getItem(`farcaster_following_${parsed.fid}`);
+          if (cachedFollowsRaw) {
+            const cachedFollows = JSON.parse(cachedFollowsRaw);
+            if (Array.isArray(cachedFollows.fids) && cachedFollows.fids.length > 0) {
+              const restoredSet = new Set<number>(cachedFollows.fids);
+              setFollowedFids(restoredSet);
+              initialFollowsSet = restoredSet;
+            }
+          }
+        } catch {}
+
+        fetchFollows(parsed.fid, savedNode || 'http://162.35.98.172:3381');
 
         // Refresh session profile in background
-        fetch(`/api/users/${parsed.fid}?nodeUrl=${encodeURIComponent(savedNode || nodeUrl)}`)
+        fetch(`/api/users/${parsed.fid}?nodeUrl=${encodeURIComponent(savedNode || 'http://162.35.98.172:3381')}`)
           .then((r) => r.json())
           .then((data) => {
             if (data.user) {
@@ -275,11 +420,12 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       // ignore
     }
 
-    pingNode();
+    pingNode(localStorage.getItem('farcaster_node_url') || 'http://162.35.98.172:3381');
     fetchFeed(
       sourceFilter,
       initialViewerFid ? 'following' : 'global',
-      initialViewerFid
+      initialViewerFid,
+      initialFollowsSet
     );
     fetchSuggestedUsers();
   }, []);
@@ -321,10 +467,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   };
 
   // 2. Node Health Check
-  const pingNode = async () => {
+  const pingNode = async (targetNode?: string) => {
     setIsPinging(true);
     try {
-      const res = await fetch(`/api/node/status?nodeUrl=${encodeURIComponent(nodeUrl)}`);
+      const activeUrl = typeof targetNode === 'string' && targetNode ? targetNode : nodeUrl;
+      const res = await fetch(`/api/node/status?nodeUrl=${encodeURIComponent(activeUrl)}`);
       const data = await res.json();
       if (data.health) {
         setNodeHealth(data.health);
@@ -795,6 +942,19 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
     setFollowedFids(updated);
 
+    if (session?.fid) {
+      try {
+        localStorage.setItem(
+          `farcaster_following_${session.fid}`,
+          JSON.stringify({
+            fids: Array.from(updated),
+            count: updated.size,
+            timestamp: Date.now(),
+          })
+        );
+      } catch {}
+    }
+
     if (currentProfile?.fid === targetFid) {
       setIsFollowingCurrentProfile(!isCurrentlyFollowed);
     }
@@ -816,7 +976,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       });
 
       if (feedMode === 'following' && session?.fid) {
-        fetchFeed(sourceFilter, 'following', session.fid);
+        fetchFeed(sourceFilter, 'following', session.fid, updated);
       }
     } catch {
       // optimistic
@@ -869,28 +1029,171 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Live Node Status Pill */}
-            <button
-              onClick={pingNode}
-              disabled={isPinging}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
-                nodeHealth.isOnline
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                  : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-              title="Click to re-ping node (:3381)"
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+            {/* Snapchain Read Node Source Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNodeDropdownOpen(!isNodeDropdownOpen)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                  nodeHealth.isOnline
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100/60'
+                    : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
-              />
-              <span className="hidden sm:inline">Node:</span>
-              <span className="font-mono font-semibold">
-                {nodeHealth.isOnline ? `${nodeHealth.latencyMs}ms` : 'localhost:3381'}
-              </span>
-              <RefreshCw className={`h-3 w-3 ml-0.5 ${isPinging ? 'animate-spin' : ''}`} />
-            </button>
+                title="Select Snapchain Read Node Source"
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                  }`}
+                />
+                <Server className="h-3.5 w-3.5 text-slate-500" />
+                <span className="hidden sm:inline font-semibold">
+                  {nodeUrl.includes('162.35.98.172')
+                    ? '162.35.98.172'
+                    : nodeUrl.includes('127.0.0.1') || nodeUrl.includes('localhost')
+                    ? 'localhost:3381'
+                    : (() => {
+                        try {
+                          return new URL(nodeUrl).host;
+                        } catch {
+                          return 'Node';
+                        }
+                      })()}
+                </span>
+                <span className="font-mono text-[11px] opacity-80">
+                  {nodeHealth.isOnline ? `${nodeHealth.latencyMs}ms` : 'offline'}
+                </span>
+                <ChevronDown className="h-3 w-3 ml-0.5 opacity-60" />
+              </button>
+
+              {/* Node Switcher Menu */}
+              {isNodeDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsNodeDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-2 space-y-2">
+                    <div className="px-2.5 py-1.5 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Snapchain Node Sources
+                      </span>
+                      <button
+                        onClick={() => pingNode()}
+                        className="text-[10px] text-purple-700 font-semibold hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isPinging ? 'animate-spin' : ''}`} />
+                        Ping
+                      </button>
+                    </div>
+
+                    {/* Presets */}
+                    <div className="space-y-1">
+                      {PRESET_NODES.map((preset) => {
+                        const isActive = nodeUrl === preset.url;
+                        return (
+                          <button
+                            key={preset.id}
+                            onClick={() => handleSelectNode(preset.url)}
+                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-colors ${
+                              isActive
+                                ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200'
+                                : 'hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`h-2 w-2 rounded-full ${
+                                    isActive && nodeHealth.isOnline
+                                      ? 'bg-emerald-500'
+                                      : 'bg-slate-300'
+                                  }`}
+                                />
+                                <span className="font-medium truncate">{preset.name}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 block pl-3.5 truncate">
+                                {preset.badge}
+                              </span>
+                            </div>
+                            {isActive && <Check className="h-4 w-4 text-purple-700 shrink-0" />}
+                          </button>
+                        );
+                      })}
+
+                      {/* Custom User Nodes */}
+                      {customNodes.map((cn) => {
+                        const isActive = nodeUrl === cn.url;
+                        return (
+                          <button
+                            key={cn.url}
+                            onClick={() => handleSelectNode(cn.url)}
+                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-colors ${
+                              isActive
+                                ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200'
+                                : 'hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`h-2 w-2 rounded-full ${
+                                    isActive && nodeHealth.isOnline
+                                      ? 'bg-emerald-500'
+                                      : 'bg-slate-300'
+                                  }`}
+                                />
+                                <span className="font-medium truncate">{cn.name}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 block pl-3.5 truncate">
+                                {cn.url}
+                              </span>
+                            </div>
+                            {isActive && <Check className="h-4 w-4 text-purple-700 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Add Custom Node */}
+                    <div className="pt-2 border-t border-slate-100">
+                      {isAddingCustomNode ? (
+                        <div className="space-y-1.5 p-1">
+                          <input
+                            type="text"
+                            value={newCustomNodeUrl}
+                            onChange={(e) => setNewCustomNodeUrl(e.target.value)}
+                            placeholder="http://ip:3381"
+                            className="w-full text-xs font-mono px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-purple-600"
+                          />
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setIsAddingCustomNode(false)}
+                              className="px-2 py-1 text-[11px] text-slate-500 hover:text-slate-700"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleAddCustomNode}
+                              className="px-2.5 py-1 text-[11px] bg-purple-700 text-white rounded-lg font-semibold hover:bg-purple-800"
+                            >
+                              Connect & Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setIsAddingCustomNode(true)}
+                          className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-xl transition-colors"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Add Custom Node</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Auth Button */}
             {session ? (
@@ -1128,31 +1431,135 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   </div>
                 )}
 
-                {/* Client Source Filters */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center gap-2 overflow-x-auto scrollbar-none">
-                  <span className="text-xs font-bold text-slate-400 pl-1 uppercase tracking-wider">Source:</span>
-                  {[
-                    { id: 'all', label: 'All Clients' },
-                    { id: 'Direct Snapchain', label: 'Direct Snapchain' },
-                    { id: 'Warpcast', label: 'Warpcast' },
-                    { id: 'Supercast', label: 'Supercast' },
-                    { id: 'Phaver', label: 'Phaver' },
-                  ].map((f) => (
+                {/* Client Source Filters & Node Source Dropdown Bar */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto scrollbar-none">
+                    <span className="text-xs font-bold text-slate-400 pl-1 uppercase tracking-wider shrink-0">
+                      Source:
+                    </span>
+
+                    {/* All Sources Dropdown */}
+                    <div className="relative shrink-0">
+                      <button
+                        onClick={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                          sourceFilter !== 'all'
+                            ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        <Filter className="h-3 w-3" />
+                        <span>
+                          {sourceFilter === 'all'
+                            ? 'All Sources'
+                            : sourceFilter}
+                        </span>
+                        <ChevronDown className="h-3 w-3 opacity-70" />
+                      </button>
+
+                      {isSourceDropdownOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setIsSourceDropdownOpen(false)}
+                          />
+                          <div className="absolute left-0 mt-2 w-64 max-h-80 overflow-y-auto rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-2 space-y-1">
+                            <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              Select Client / Node Source
+                            </div>
+
+                            {castSources.map((source) => {
+                              const isSelected = sourceFilter === source.id;
+                              return (
+                                <button
+                                  key={source.id}
+                                  onClick={() => {
+                                    setSourceFilter(source.id);
+                                    setIsSourceDropdownOpen(false);
+                                    fetchFeed(source.id, feedMode, session?.fid);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors ${
+                                    isSelected
+                                      ? 'bg-purple-50 text-purple-900 font-bold'
+                                      : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span
+                                      className={`h-2 w-2 rounded-full shrink-0 ${
+                                        source.id === 'all'
+                                          ? 'bg-purple-600'
+                                          : getClientDotColor(source.id)
+                                      }`}
+                                    />
+                                    <span className="truncate">{source.label}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                                    {source.count > 0 && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-mono">
+                                        {source.count}
+                                      </span>
+                                    )}
+                                    {isSelected && (
+                                      <Check className="h-3.5 w-3.5 text-purple-700" />
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Quick Access Top Source Pills */}
+                    <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                      {[
+                        { id: 'all', label: 'All' },
+                        { id: 'Direct Snapchain', label: 'Direct Snapchain' },
+                        { id: 'Warpcast', label: 'Warpcast' },
+                        { id: 'Supercast', label: 'Supercast' },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => {
+                            setSourceFilter(f.id);
+                            fetchFeed(f.id, feedMode, session?.fid);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                            sourceFilter === f.id
+                              ? 'bg-purple-700 text-white shadow-xs'
+                              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Active Node Quick Switcher Badge */}
+                  <div className="relative shrink-0">
                     <button
-                      key={f.id}
-                      onClick={() => {
-                        setSourceFilter(f.id);
-                        fetchFeed(f.id, feedMode, session?.fid);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                        sourceFilter === f.id
-                          ? 'bg-purple-700 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
-                      }`}
+                      onClick={() => setIsNodeDropdownOpen(true)}
+                      className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
+                      title="Active Snapchain Node - Click to switch"
                     >
-                      {f.label}
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                        }`}
+                      />
+                      <span className="font-semibold text-slate-800">
+                        {nodeUrl.includes('162.35.98.172')
+                          ? '162.35.98.172'
+                          : nodeUrl.includes('127.0.0.1')
+                          ? 'localhost'
+                          : 'Custom Node'}
+                      </span>
+                      <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
                     </button>
-                  ))}
+                  </div>
                 </div>
 
                 {/* Inline Cast Composer */}
@@ -1324,32 +1731,35 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           )}
                         </div>
 
-                        {/* Cast Text (Clickable to open thread) */}
+                        {/* Cast Text with Link & Mention Highlighting */}
                         <div
                           onClick={() => handleOpenThread(cast.hash, cast.author?.username, true)}
-                          className="cursor-pointer text-sm text-slate-800 leading-relaxed whitespace-pre-wrap select-text hover:text-slate-950"
+                          className="cursor-pointer text-sm text-slate-800 leading-relaxed select-text hover:text-slate-950"
                         >
-                          {cast.text}
+                          <FormattedCastText
+                            text={cast.text}
+                            onUserClick={(username) => handleOpenProfile(username, 'casts', true)}
+                          />
                         </div>
 
-                        {/* Quoted Cast Embed if any */}
-                        {cast.embeds?.some((e) => e.castId) && (
-                          <div
-                            onClick={() => {
-                              const q = cast.embeds?.find((e) => e.castId)?.castId;
-                              if (q?.hash) handleOpenThread(q.hash, undefined, true);
-                            }}
-                            className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs space-y-1 cursor-pointer hover:bg-slate-100 transition-all"
-                          >
-                            <span className="font-semibold text-purple-900 flex items-center gap-1">
-                              <Quote className="h-3 w-3" />
-                              Quoted Cast
-                            </span>
-                            <p className="text-slate-600 font-mono text-[11px] truncate">
-                              Protocol Hash: {cast.embeds.find((e) => e.castId)?.castId?.hash}
-                            </p>
-                          </div>
-                        )}
+                        {/* Link & Media Previews (Images, Videos, OpenGraph Website Cards) */}
+                        <CastMediaPreviews
+                          embeds={cast.embeds?.filter((e) => !e.castId)}
+                          text={cast.text}
+                        />
+
+                        {/* Rich Quoted Cast Embed */}
+                        {cast.embeds
+                          ?.filter((e) => e.castId)
+                          .map((e, idx) => (
+                            <QuoteCastCard
+                              key={idx}
+                              castId={e.castId!}
+                              nodeUrl={nodeUrl}
+                              onOpenThread={(h, u) => handleOpenThread(h, u, true)}
+                              onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
+                            />
+                          ))}
 
                         {/* Interaction Bar */}
                         <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-slate-500">
@@ -1493,9 +1903,31 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                         )}
                       </div>
 
-                      <p className="text-base text-slate-900 leading-relaxed whitespace-pre-wrap select-text">
-                        {currentThreadCast.text}
-                      </p>
+                      <div className="text-base text-slate-900 leading-relaxed select-text">
+                        <FormattedCastText
+                          text={currentThreadCast.text}
+                          onUserClick={(username) => handleOpenProfile(username, 'casts', true)}
+                        />
+                      </div>
+
+                      {/* Media & Link Previews */}
+                      <CastMediaPreviews
+                        embeds={currentThreadCast.embeds?.filter((e) => !e.castId)}
+                        text={currentThreadCast.text}
+                      />
+
+                      {/* Quoted Casts in Thread */}
+                      {currentThreadCast.embeds
+                        ?.filter((e) => e.castId)
+                        .map((e, idx) => (
+                          <QuoteCastCard
+                            key={idx}
+                            castId={e.castId!}
+                            nodeUrl={nodeUrl}
+                            onOpenThread={(h, u) => handleOpenThread(h, u, true)}
+                            onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
+                          />
+                        ))}
 
                       <div className="text-xs text-slate-400 font-mono pt-2 border-t border-slate-100 flex items-center justify-between">
                         <span>{new Date(currentThreadCast.timestamp).toLocaleString()}</span>
@@ -1619,7 +2051,29 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-xs text-slate-800 whitespace-pre-wrap">{r.text}</p>
+                            <div className="text-xs text-slate-800 leading-relaxed">
+                              <FormattedCastText
+                                text={r.text}
+                                onUserClick={(username) => handleOpenProfile(username, 'casts', true)}
+                              />
+                            </div>
+
+                            <CastMediaPreviews
+                              embeds={r.embeds?.filter((e) => !e.castId)}
+                              text={r.text}
+                            />
+
+                            {r.embeds
+                              ?.filter((e) => e.castId)
+                              .map((e, idx) => (
+                                <QuoteCastCard
+                                  key={idx}
+                                  castId={e.castId!}
+                                  nodeUrl={nodeUrl}
+                                  onOpenThread={(h, u) => handleOpenThread(h, u, true)}
+                                  onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
+                                />
+                              ))}
                           </div>
                         ))
                       )}
@@ -1845,29 +2299,35 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               </div>
                             </div>
 
-                            {/* Cast Body */}
-                            <p
+                            {/* Cast Body with Link & Mention Highlighting */}
+                            <div
                               onClick={() => handleOpenThread(cast.hash, cast.author?.username, true)}
-                              className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap cursor-pointer hover:text-slate-950"
+                              className="text-xs text-slate-800 leading-relaxed cursor-pointer hover:text-slate-950"
                             >
-                              {cast.text}
-                            </p>
+                              <FormattedCastText
+                                text={cast.text}
+                                onUserClick={(username) => handleOpenProfile(username, 'casts', true)}
+                              />
+                            </div>
 
-                            {/* Quote Embed preview */}
-                            {Array.isArray(cast.embeds) && cast.embeds.some((e) => e.castId) && (
-                              <div
-                                onClick={() => {
-                                  const q = cast.embeds?.find((e) => e.castId)?.castId;
-                                  if (q?.hash) handleOpenThread(q.hash, undefined, true);
-                                }}
-                                className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600 hover:bg-purple-50/50 hover:border-purple-200 cursor-pointer transition-all flex items-center gap-2"
-                              >
-                                <Quote className="h-3.5 w-3.5 text-purple-600 shrink-0" />
-                                <span className="truncate text-[11px] font-mono text-slate-500">
-                                  Quoting cast: {cast.embeds.find((e) => e.castId)?.castId?.hash.slice(0, 14)}...
-                                </span>
-                              </div>
-                            )}
+                            {/* Media & Link Previews */}
+                            <CastMediaPreviews
+                              embeds={cast.embeds?.filter((e) => !e.castId)}
+                              text={cast.text}
+                            />
+
+                            {/* Rich Quoted Cast Embed */}
+                            {cast.embeds
+                              ?.filter((e) => e.castId)
+                              .map((e, idx) => (
+                                <QuoteCastCard
+                                  key={idx}
+                                  castId={e.castId!}
+                                  nodeUrl={nodeUrl}
+                                  onOpenThread={(h, u) => handleOpenThread(h, u, true)}
+                                  onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
+                                />
+                              ))}
 
                             {/* Actions Footer */}
                             <div className="flex items-center gap-6 pt-1 text-slate-500 border-t border-slate-100">
@@ -1931,7 +2391,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                     </div>
                   </div>
                   <button
-                    onClick={pingNode}
+                    onClick={() => pingNode()}
                     disabled={isPinging}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold hover:bg-slate-50 text-slate-700"
                   >
@@ -1965,6 +2425,23 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                       <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin' : ''}`} />
                       <span>Connect & Ping</span>
                     </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-purple-900/70 font-semibold">Quick Switch:</span>
+                    {PRESET_NODES.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handleSelectNode(preset.url)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold border transition-all ${
+                          nodeUrl === preset.url
+                            ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
+                            : 'bg-white text-purple-900 border-purple-200 hover:bg-purple-100'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
                   </div>
                   <p className="text-[11px] text-purple-900/70">
                     All client reads and <code className="font-mono font-semibold">:3381/v1/submitMessage</code> writes connect directly to this node.

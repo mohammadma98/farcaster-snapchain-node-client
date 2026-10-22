@@ -235,7 +235,8 @@ class FeedStore {
    */
   public async getCastThread(
     hash: string,
-    nodeUrl?: string
+    nodeUrl?: string,
+    fid?: number
   ): Promise<{
     cast: FarcasterCast | null;
     parent: FarcasterCast | null;
@@ -246,15 +247,26 @@ class FeedStore {
 
     // Search local node if not in local store
     if (!cast && nodeUrl) {
-      // Check known active FIDs
-      const checkFids = Array.from(new Set([2, 3, 37, ...Array.from(this.users.keys())]));
-      for (const fid of checkFids) {
+      if (fid) {
         const nodeCast = await defaultNodeClient.getCastById(fid, cleanHash, nodeUrl);
         if (nodeCast) {
           const author = await this.getUser(nodeCast.fid, nodeUrl);
           if (author) nodeCast.author = author;
           cast = this.addCast(nodeCast);
-          break;
+        }
+      }
+
+      if (!cast) {
+        // Check known active FIDs or network fallback
+        const checkFids = Array.from(new Set([2, 3, 37, ...Array.from(this.users.keys())]));
+        for (const f of checkFids) {
+          const nodeCast = await defaultNodeClient.getCastById(f, cleanHash, nodeUrl);
+          if (nodeCast) {
+            const author = await this.getUser(nodeCast.fid, nodeUrl);
+            if (author) nodeCast.author = author;
+            cast = this.addCast(nodeCast);
+            break;
+          }
         }
       }
     }
@@ -353,6 +365,7 @@ class FeedStore {
     sourceFilter?: string;
     fid?: number;
     viewerFid?: number;
+    followedFids?: number[];
     mode?: 'following' | 'global';
     nodeUrl?: string;
   }): Promise<FarcasterCast[]> {
@@ -381,24 +394,38 @@ class FeedStore {
     if (options?.viewerFid && !isGlobal) {
       const viewerFid = options.viewerFid;
 
-      // 1. Fetch real-time follows from network (local node + protocol directory fallback)
-      const { fids: remoteFids, users: remoteUsers } = await defaultNodeClient.getFollowsByFid(
-        viewerFid,
-        targetNodeUrl
-      );
-      for (const u of remoteUsers) {
-        this.registerUser(u);
-      }
-
-      // Merge with in-memory session follows
+      // Combine client provided followedFids with cached follows
+      const clientProvidedFids = options?.followedFids || [];
       const sessionFollows = this.getFollowedFids(viewerFid);
-      const allFollowedFids = Array.from(new Set([...remoteFids, ...sessionFollows]));
-      this.setFollowedFids(viewerFid, allFollowedFids);
+      let allFollowedFids = Array.from(new Set([...clientProvidedFids, ...sessionFollows]));
+
+      // If we don't have enough followed accounts yet, fetch from network
+      if (allFollowedFids.length === 0) {
+        const { fids: remoteFids, users: remoteUsers } = await defaultNodeClient.getFollowsByFid(
+          viewerFid,
+          targetNodeUrl
+        );
+        for (const u of remoteUsers) {
+          this.registerUser(u);
+        }
+        allFollowedFids = Array.from(new Set([...remoteFids, ...sessionFollows]));
+        this.setFollowedFids(viewerFid, allFollowedFids);
+      } else {
+        // Background refresh if needed
+        defaultNodeClient
+          .getFollowsByFid(viewerFid, targetNodeUrl)
+          .then(({ fids: rFids, users: rUsers }) => {
+            for (const u of rUsers) this.registerUser(u);
+            const merged = Array.from(new Set([...rFids, ...allFollowedFids]));
+            this.setFollowedFids(viewerFid, merged);
+          })
+          .catch(() => {});
+      }
 
       // If user follows people, fetch latest casts for followed accounts
       if (allFollowedFids.length > 0) {
-        // Query up to 25 followed accounts in parallel
-        const targetAccounts = allFollowedFids.slice(0, 25);
+        // Query up to 35 followed accounts in parallel
+        const targetAccounts = allFollowedFids.slice(0, 35);
         await Promise.allSettled(
           targetAccounts.map(async (fId) => {
             try {

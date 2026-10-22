@@ -12,6 +12,13 @@ export async function GET(request: Request) {
     const fid = fidParam ? parseInt(fidParam, 10) : undefined;
     const viewerFidParam = searchParams.get('viewerFid');
     const viewerFid = viewerFidParam ? parseInt(viewerFidParam, 10) : undefined;
+    const followedFidsParam = searchParams.get('followedFids');
+    const followedFids = followedFidsParam
+      ? followedFidsParam
+          .split(',')
+          .map((id) => parseInt(id.trim(), 10))
+          .filter((n) => !isNaN(n) && n > 0)
+      : undefined;
     const mode = (searchParams.get('mode') as 'following' | 'global') || undefined;
     const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
@@ -20,6 +27,7 @@ export async function GET(request: Request) {
       sourceFilter,
       fid,
       viewerFid,
+      followedFids,
       mode,
       nodeUrl,
     });

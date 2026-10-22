@@ -10,9 +10,11 @@ export async function GET(
   try {
     const { hash } = params;
     const { searchParams } = new URL(request.url);
+    const fidParam = searchParams.get('fid');
+    const fid = fidParam ? parseInt(fidParam, 10) : undefined;
     const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
-    const thread = await feedStore.getCastThread(hash, nodeUrl);
+    const thread = await feedStore.getCastThread(hash, nodeUrl, fid);
 
     if (!thread.cast) {
       return NextResponse.json(
