@@ -159,11 +159,36 @@ esac
 SNAPCHAIN_DIR="${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}"
 NODE_OPERATOR_FID="${1:-2}"
 
-mkdir -p "$SNAPCHAIN_DIR"
-cd "$SNAPCHAIN_DIR"
+if ! mkdir -p "$SNAPCHAIN_DIR" 2>/dev/null; then
+    echo -e "\n${RED}[ERROR] Failed to create directory: ${SNAPCHAIN_DIR}${NC}"
+    echo -e "${YELLOW}The underlying mount or storage volume appears to be Read-Only (ro) or inaccessible.${NC}"
+    exit 1
+fi
+
+if ! cd "$SNAPCHAIN_DIR" 2>/dev/null; then
+    echo -e "\n${RED}[ERROR] Cannot enter target directory: ${SNAPCHAIN_DIR}${NC}"
+    exit 1
+fi
+
+# Pre-flight write check to catch read-only mounts, permission issues, or full disks before curl
+if ! touch .write_test 2>/dev/null; then
+    MOUNT_PT=$(df -P "$SNAPCHAIN_DIR" 2>/dev/null | awk 'NR==2 {print $6}')
+    echo -e "\n${RED}[ERROR] Target directory is NOT writable: ${SNAPCHAIN_DIR}${NC}"
+    echo -e "${YELLOW}Common causes on this host:${NC}"
+    echo -e "  1. Storage volume (${MOUNT_PT}) is mounted Read-Only (ro)."
+    echo -e "     Fix: mount -o remount,rw ${MOUNT_PT}"
+    echo -e "  2. Disk is 100% full or out of inodes (check: df -h '${SNAPCHAIN_DIR}' / df -i '${SNAPCHAIN_DIR}')."
+    echo -e "  3. Filesystem corruption forced kernel into safety read-only mode (check: dmesg | grep -iE 'ext4|error|sdb')."
+    exit 1
+fi
+rm -f .write_test 2>/dev/null || true
+
+# Clean up broken directory artifacts if created by Docker volume mounts
+[ -d "snapchain.sh" ] && rm -rf "snapchain.sh" 2>/dev/null || true
+[ -d "docker-compose.yml" ] && rm -rf "docker-compose.yml" 2>/dev/null || true
 
 echo -e "${YELLOW}[1/4] Pulling node manifests & management scripts...${NC}"
-curl -sSL -o snapchain.sh https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/scripts/snapchain.sh
+curl -fsSL -o snapchain.sh https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/scripts/snapchain.sh
 chmod +x snapchain.sh
 
 cat <<EOF > .env
@@ -174,8 +199,8 @@ SKIP_CRONTAB=false
 GRAFANA_CREDS=admin:admin
 EOF
 
-curl -sSL -o docker-compose.yml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/docker-compose.mainnet.yml
-curl -sSL -o validators.toml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/validators.toml
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/docker-compose.mainnet.yml
+curl -fsSL -o validators.toml https://raw.githubusercontent.com/farcasterxyz/snapchain/refs/heads/main/validators.toml
 
 # ------------------------------------------------------------------------------
 # 4. Tailor Docker Compose Configuration & Resource Ceilings
