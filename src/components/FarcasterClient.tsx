@@ -824,7 +824,12 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setCasts((prev) => [data.cast, ...prev]);
       }
     } catch (err: any) {
-      showToast(`Publication notice: ${err.message}`);
+      if (err.message?.includes('invalid signer')) {
+        showToast('Signer session expired or node restarted. Please log in again to renew your gasless key.');
+        setIsAuthModalOpen(true);
+      } else {
+        showToast(`Publication notice: ${err.message}`);
+      }
     } finally {
       setIsPublishing(false);
     }
@@ -954,7 +959,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setThreadReplies((prev) => updateReactionInList(prev, wasActive));
 
         const errMsg = data.error || data.nodeResult?.error || 'Reaction rejected by node';
-        showToast(`Reaction notice: ${errMsg}`);
+        if (errMsg.includes('invalid signer')) {
+          showToast('Signer not recognized by node (node may have restarted). Please log in again to renew your gasless key.');
+        } else {
+          showToast(`Reaction notice: ${errMsg}`);
+        }
       }
     } catch (err: any) {
       // Revert optimistic state
