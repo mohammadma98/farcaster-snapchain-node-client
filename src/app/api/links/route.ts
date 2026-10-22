@@ -49,17 +49,32 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!fid || !signerPrivateKey) {
+      return NextResponse.json(
+        { status: 'error', error: 'Authentication required: missing fid or signerPrivateKey' },
+        { status: 401 }
+      );
+    }
+
     const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // 1. Submit LinkAdd or LinkRemove to Snapchain node
-    let nodeResult: { success: boolean; hash?: string; error?: string } = { success: false };
-    if (fid && signerPrivateKey) {
-      nodeResult = await defaultNodeClient.publishFollow(
-        fid,
-        signerPrivateKey,
-        targetFid,
-        !!isRemove,
-        targetNodeUrl
+    const nodeResult = await defaultNodeClient.publishFollow(
+      fid,
+      signerPrivateKey,
+      targetFid,
+      !!isRemove,
+      targetNodeUrl
+    );
+
+    if (!nodeResult.success) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: nodeResult.error || 'Snapchain node rejected the follow operation.',
+          nodeResult,
+        },
+        { status: 400 }
       );
     }
 

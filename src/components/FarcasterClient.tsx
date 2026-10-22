@@ -876,6 +876,12 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
   // 10. Toggle Like or Recast
   const handleToggleReaction = async (castHash: string, type: 'like' | 'recast', targetFid: number) => {
+    if (!session || !session.signerPrivateKey) {
+      setIsAuthModalOpen(true);
+      showToast('Please log in with your Farcaster account to like or recast.');
+      return;
+    }
+
     // Find prior active status to determine add vs remove
     let wasActive = false;
     const targetCast =
@@ -887,22 +893,20 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       wasActive = type === 'like' ? !!targetCast.reactions?.likedByMe : !!targetCast.reactions?.recastByMe;
     }
 
-    // Optimistic UI update
-    const updateReactionInList = (list: FarcasterCast[]) =>
+    // Optimistic UI update helper
+    const updateReactionInList = (list: FarcasterCast[], activeState: boolean) =>
       list.map((c) => {
         if (c.hash !== castHash) return c;
         const currentLikes = c.reactions?.likesCount || 0;
         const currentRecasts = c.reactions?.recastsCount || 0;
-        const liked = !!c.reactions?.likedByMe;
-        const recasted = !!c.reactions?.recastByMe;
 
         if (type === 'like') {
           return {
             ...c,
             reactions: {
               ...c.reactions!,
-              likesCount: liked ? Math.max(0, currentLikes - 1) : currentLikes + 1,
-              likedByMe: !liked,
+              likesCount: activeState ? currentLikes + 1 : Math.max(0, currentLikes - 1),
+              likedByMe: activeState,
             },
           };
         } else {
@@ -910,27 +914,28 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             ...c,
             reactions: {
               ...c.reactions!,
-              recastsCount: recasted ? Math.max(0, currentRecasts - 1) : currentRecasts + 1,
-              recastByMe: !recasted,
+              recastsCount: activeState ? currentRecasts + 1 : Math.max(0, currentRecasts - 1),
+              recastByMe: activeState,
             },
           };
         }
       });
 
-    setCasts(updateReactionInList);
+    // Apply optimistic state
+    setCasts((prev) => updateReactionInList(prev, !wasActive));
     if (currentThreadCast?.hash === castHash) {
-      setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev])[0] : null));
+      setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], !wasActive)[0] : null));
     }
-    setThreadReplies(updateReactionInList);
+    setThreadReplies((prev) => updateReactionInList(prev, !wasActive));
 
     // Backend call
     try {
-      await fetch('/api/reactions', {
+      const res = await fetch('/api/reactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fid: session?.fid || 99281,
-          signerPrivateKey: session?.signerPrivateKey,
+          fid: session.fid,
+          signerPrivateKey: session.signerPrivateKey,
           targetFid,
           targetHash: castHash,
           type,
@@ -938,13 +943,38 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           nodeUrl,
         }),
       });
-    } catch {
-      // Optimistic already updated
+
+      const data = await res.json();
+      if (!res.ok || data.status !== 'ok') {
+        // Revert optimistic state upon rejection
+        setCasts((prev) => updateReactionInList(prev, wasActive));
+        if (currentThreadCast?.hash === castHash) {
+          setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], wasActive)[0] : null));
+        }
+        setThreadReplies((prev) => updateReactionInList(prev, wasActive));
+
+        const errMsg = data.error || data.nodeResult?.error || 'Reaction rejected by node';
+        showToast(`Reaction notice: ${errMsg}`);
+      }
+    } catch (err: any) {
+      // Revert optimistic state
+      setCasts((prev) => updateReactionInList(prev, wasActive));
+      if (currentThreadCast?.hash === castHash) {
+        setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], wasActive)[0] : null));
+      }
+      setThreadReplies((prev) => updateReactionInList(prev, wasActive));
+      showToast(`Network error: ${err.message}`);
     }
   };
 
   // 11. Toggle Follow / Unfollow
   const handleToggleFollow = async (targetFid: number) => {
+    if (!session || !session.signerPrivateKey) {
+      setIsAuthModalOpen(true);
+      showToast('Please log in with your Farcaster account to follow or unfollow.');
+      return;
+    }
+
     const isCurrentlyFollowed = followedFids.has(targetFid);
     const updated = new Set(followedFids);
     if (isCurrentlyFollowed) {
@@ -971,15 +1001,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       setIsFollowingCurrentProfile(!isCurrentlyFollowed);
     }
 
-    showToast(isCurrentlyFollowed ? 'Unfollowed user' : 'Following user on Snapchain');
-
     try {
-      await fetch('/api/links', {
+      const res = await fetch('/api/links', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fid: session?.fid || 99281,
-          signerPrivateKey: session?.signerPrivateKey,
+          fid: session.fid,
+          signerPrivateKey: session.signerPrivateKey,
           targetFid,
           type: 'follow',
           isRemove: isCurrentlyFollowed,
@@ -987,11 +1015,29 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         }),
       });
 
-      if (feedMode === 'following' && session?.fid) {
-        fetchFeed(sourceFilter, 'following', session.fid, updated);
+      const data = await res.json();
+      if (!res.ok || data.status !== 'ok') {
+        // Revert follow state
+        const reverted = new Set(followedFids);
+        setFollowedFids(reverted);
+        if (currentProfile?.fid === targetFid) {
+          setIsFollowingCurrentProfile(isCurrentlyFollowed);
+        }
+        const errMsg = data.error || data.nodeResult?.error || 'Failed to update follow status';
+        showToast(`Follow notice: ${errMsg}`);
+      } else {
+        showToast(isCurrentlyFollowed ? 'Unfollowed user' : 'Following user on Snapchain');
+        if (feedMode === 'following' && session?.fid) {
+          fetchFeed(sourceFilter, 'following', session.fid, updated);
+        }
       }
-    } catch {
-      // optimistic
+    } catch (err: any) {
+      const reverted = new Set(followedFids);
+      setFollowedFids(reverted);
+      if (currentProfile?.fid === targetFid) {
+        setIsFollowingCurrentProfile(isCurrentlyFollowed);
+      }
+      showToast(`Network error: ${err.message}`);
     }
   };
 

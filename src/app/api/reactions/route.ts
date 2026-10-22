@@ -16,23 +16,41 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
-
-    // 1. Submit to Snapchain node if private key provided
-    let nodeResult: { success: boolean; hash?: string; error?: string } = { success: false };
-    if (fid && signerPrivateKey && targetFid) {
-      nodeResult = await defaultNodeClient.publishReaction(
-        fid,
-        signerPrivateKey,
-        targetFid,
-        targetHash,
-        type,
-        !!isRemove,
-        targetNodeUrl
+    if (!fid || !signerPrivateKey || !targetFid) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: 'Authentication required: missing fid, signerPrivateKey, or targetFid. Please log in with your account.',
+        },
+        { status: 401 }
       );
     }
 
-    // 2. Update local state
+    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+
+    // 1. Submit to Snapchain node
+    const nodeResult = await defaultNodeClient.publishReaction(
+      fid,
+      signerPrivateKey,
+      targetFid,
+      targetHash,
+      type,
+      !!isRemove,
+      targetNodeUrl
+    );
+
+    if (!nodeResult.success) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          error: nodeResult.error || 'Snapchain node rejected the reaction submission.',
+          nodeResult,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 2. Update local state only upon accepted submission
     const reactionState = feedStore.toggleReaction(targetHash, type, fid);
 
     return NextResponse.json({
