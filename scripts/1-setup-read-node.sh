@@ -389,6 +389,50 @@ update_status() {
     echo -e "$msg" > "${STATUS_FILE}.tmp" && mv -f "${STATUS_FILE}.tmp" "$STATUS_FILE"
 }
 
+get_rx_bytes() {
+    local sum=0
+    for f in /sys/class/net/*/statistics/rx_bytes; do
+        if [[ "$f" != *"/lo/"* && "$f" != *"/docker"* && "$f" != *"/veth"* && "$f" != *"/br-"* ]]; then
+            local val
+            val=$(cat "$f" 2>/dev/null || echo 0)
+            sum=$(( sum + val ))
+        fi
+    done
+    if [ "$sum" -eq 0 ] && [ -f /proc/net/dev ]; then
+        sum=$(awk -F'[: ]+' 'NR>2 && $2 !~ /^(lo|docker|veth|br-)/ {for(i=3;i<=NF;i++) if($i ~ /^[0-9]+$/){s+=$i; break}} END {print s+0}' /proc/net/dev 2>/dev/null || echo 0)
+    fi
+    echo "$sum"
+}
+
+get_cpu_stat() {
+    local u=0 n=0 s=0 id=0 io=0 irq=0 sirq=0 st=0
+    read -r _ u n s id io irq sirq st _ < /proc/stat 2>/dev/null || true
+    local tot=$(( u + n + s + id + io + irq + sirq + st ))
+    local act=$(( tot - id - io ))
+    echo "$tot $act $io"
+}
+
+get_mem_stat() {
+    local tot
+    local avail
+    tot=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    avail=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    local used=$(( tot - avail ))
+    echo "$used $tot"
+}
+
+get_tar_write_bytes() {
+    local pid="$1"
+    local bytes=0
+    if [ -f "/proc/${pid}/io" ]; then
+        bytes=$(awk '/write_bytes:/ {print $2}' "/proc/${pid}/io" 2>/dev/null || echo 0)
+    fi
+    if [ "$bytes" -eq 0 ]; then
+        bytes=$(df -B1 "${SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk 'NR==2 {print $3}' || echo 0)
+    fi
+    echo "$bytes"
+}
+
 R2_PUBLIC_BASE="https://pub-d352dd8819104a778e20d08888c5a661.r2.dev"
 NETWORK_NAME="FARCASTER_NETWORK_MAINNET"
 SHARDS=(0 1 2)
@@ -398,11 +442,13 @@ mkdir -p "${SNAPCHAIN_DIR}/.rocks"
 
 PIPE_FIFO=""
 TAR_PID=""
+METRICS_PID=""
 BUFFER_DIR=""
 declare -A TASK_PIDS=()
 
 cleanup_resources() {
     exec 3>&- 2>/dev/null || true
+    [ -n "$METRICS_PID" ] && kill -9 "$METRICS_PID" 2>/dev/null || true
     [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO" 2>/dev/null || true
     for p in "${TASK_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
@@ -487,39 +533,64 @@ for SHARD_ID in "${SHARDS[@]}"; do
     declare -A TASK_PIDS=()
     NEXT_DOWNLOAD_IDX=0
 
+    # Initialize state sync files in buffer directory
+    echo "0 0" > "${BUFFER_DIR}/.progress_sync"
+    : > "${BUFFER_DIR}/.ext_stats"
+    : > "${BUFFER_DIR}/.pipe_stats"
+
     download_and_prep_chunk() {
         local idx="$1"
         local chunk_name="$2"
         local chunk_url="$3"
         local comp_file="${BUFFER_DIR}/${chunk_name}"
         local raw_file="${BUFFER_DIR}/${chunk_name}.raw"
-        local dl_marker="${BUFFER_DIR}/.dl_done_${idx}"
+        local dl_active="${BUFFER_DIR}/.dl_active_${idx}"
+        local dl_done="${BUFFER_DIR}/.dl_done_${idx}"
+        local wait_ext="${BUFFER_DIR}/.waiting_ext_${idx}"
+        local ext_active="${BUFFER_DIR}/.ext_active_${idx}"
+        local ext_done="${BUFFER_DIR}/.ext_done_${idx}"
         local size_file="${BUFFER_DIR}/.size_${idx}"
+
+        touch "$dl_active"
 
         # 1. Download chunk directly into RAM buffer
         if ! curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${comp_file}.tmp"; then
+            rm -f "$dl_active" 2>/dev/null || true
             echo "[ERROR] Download failed for chunk ${chunk_name}" >> "$LOG_FILE"
             touch "${BUFFER_DIR}/.err_${idx}"
-            touch "$dl_marker"
+            touch "$dl_done"
             return 1
         fi
 
         mv -f "${comp_file}.tmp" "$comp_file"
         stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
-        touch "$dl_marker" # Signal download completion to free download slot for next chunk
+        rm -f "$dl_active" 2>/dev/null || true
+        touch "$dl_done"   # Download slot freed for refill_download_queue
+        touch "$wait_ext"  # Chunk is in RAM, waiting for extraction
 
-        # 2. Extract immediately in RAM, with graceful fallback on low memory or failure
+        # 2. Extract in RAM, with fallback on low memory or failure
         local avail_mb
         avail_mb=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
 
-        # Require ~250MB free RAM headroom to safely extract raw uncompressed chunk
         if [ "${avail_mb:-0}" -ge 250 ]; then
+            rm -f "$wait_ext" 2>/dev/null || true
+            touch "$ext_active"
+            local t_ext_start
+            t_ext_start=$(date +%s%3N 2>/dev/null || date +%s)
             if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
+                local t_ext_end
+                t_ext_end=$(date +%s%3N 2>/dev/null || date +%s)
                 mv -f "${raw_file}.tmp" "$raw_file"
-                rm -f "$comp_file" # Delete original compressed chunk from RAM, replaced by extracted data
+                rm -f "$comp_file" 2>/dev/null || true
+                rm -f "$ext_active" 2>/dev/null || true
+                touch "$ext_done"
+                local raw_sz
+                raw_sz=$(stat -c%s "$raw_file" 2>/dev/null || echo 0)
+                echo "$idx $raw_sz $t_ext_start $t_ext_end" >> "${BUFFER_DIR}/.ext_stats"
             else
                 rm -f "${raw_file}.tmp" 2>/dev/null || true
-                # Low memory or decompress error: keep $comp_file intact for on-the-fly decompression
+                rm -f "$ext_active" 2>/dev/null || true
+                touch "$wait_ext"
             fi
         fi
         return 0
@@ -533,7 +604,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 break
             fi
 
-            # Count active downloads (tasks still in downloading phase before dl_marker)
+            # Count active downloads (tasks still in downloading phase before dl_done)
             local active_downloads=0
             for idx in "${!TASK_PIDS[@]}"; do
                 local p="${TASK_PIDS[$idx]}"
@@ -557,6 +628,261 @@ for SHARD_ID in "${SHARDS[@]}"; do
         done
     }
 
+    # --------------------------------------------------------------------------
+    # Real-Time Observability & Bottleneck Sampling Engine
+    # --------------------------------------------------------------------------
+    collect_live_metrics() {
+        local shard_id="$1"
+        local total_chunks="$2"
+        local buf_dir="$3"
+        local tar_pid="$4"
+        local start_t="$5"
+        local total_shards="${#SHARDS[@]}"
+
+        local prev_time
+        prev_time=$(date +%s)
+        local prev_rx
+        prev_rx=$(get_rx_bytes)
+
+        local cpu_prev
+        cpu_prev=$(get_cpu_stat)
+        local prev_cpu_tot
+        prev_cpu_tot=$(echo "$cpu_prev" | awk '{print $1}')
+        local prev_cpu_act
+        prev_cpu_act=$(echo "$cpu_prev" | awk '{print $2}')
+        local prev_cpu_io
+        prev_cpu_io=$(echo "$cpu_prev" | awk '{print $3}')
+
+        local prev_tar_io
+        prev_tar_io=$(get_tar_write_bytes "$tar_pid")
+        local prev_ext_bytes=0
+        local prev_inj_bytes=0
+
+        local avg_chunk_comp=70362152
+        local total_comp_est=$(( total_chunks * avg_chunk_comp ))
+
+        while kill -0 "$tar_pid" 2>/dev/null; do
+            sleep 1
+            local curr_time
+            curr_time=$(date +%s)
+            local delta_t=$(( curr_time - prev_time ))
+            if [ "$delta_t" -le 0 ]; then delta_t=1; fi
+
+            # 1. Network Rate & Active Downloads
+            local curr_rx
+            curr_rx=$(get_rx_bytes)
+            local delta_rx=$(( curr_rx - prev_rx ))
+            if [ "$delta_rx" -lt 0 ]; then delta_rx=0; fi
+            local net_speed=$(( delta_rx / delta_t ))
+            prev_rx="$curr_rx"
+
+            local dl_active_cnt
+            dl_active_cnt=$(find "$buf_dir" -maxdepth 1 -name '.dl_active_*' 2>/dev/null | wc -l || echo 0)
+
+            # 2. Host CPU & Storage I/O Wait
+            local cpu_curr
+            cpu_curr=$(get_cpu_stat)
+            local curr_cpu_tot
+            curr_cpu_tot=$(echo "$cpu_curr" | awk '{print $1}')
+            local curr_cpu_act
+            curr_cpu_act=$(echo "$cpu_curr" | awk '{print $2}')
+            local curr_cpu_io
+            curr_cpu_io=$(echo "$cpu_curr" | awk '{print $3}')
+            local delta_tot=$(( curr_cpu_tot - prev_cpu_tot ))
+            local delta_act=$(( curr_cpu_act - prev_cpu_act ))
+            local delta_io=$(( curr_cpu_io - prev_cpu_io ))
+            local cpu_pct=0
+            local iowait_pct=0
+            if [ "$delta_tot" -gt 0 ]; then
+                cpu_pct=$(( delta_act * 100 / delta_tot ))
+                iowait_pct=$(( delta_io * 100 / delta_tot ))
+            fi
+            prev_cpu_tot="$curr_cpu_tot"
+            prev_cpu_act="$curr_cpu_act"
+            prev_cpu_io="$curr_cpu_io"
+
+            # 3. Host System Memory & /dev/shm Buffer
+            local mem_info
+            mem_info=$(get_mem_stat)
+            local mem_used_kb
+            mem_used_kb=$(echo "$mem_info" | awk '{print $1}')
+            local mem_tot_kb
+            mem_tot_kb=$(echo "$mem_info" | awk '{print $2}')
+            local mem_pct=0
+            if [ "$mem_tot_kb" -gt 0 ]; then
+                mem_pct=$(( mem_used_kb * 100 / mem_tot_kb ))
+            fi
+            local shm_tot
+            shm_tot=$(df -B1 "$buf_dir" 2>/dev/null | awk 'NR==2 {print $2}' || echo 1)
+            local shm_avail
+            shm_avail=$(df -B1 "$buf_dir" 2>/dev/null | awk 'NR==2 {print $4}' || echo 1)
+            local shm_used=$(( shm_tot - shm_avail ))
+            local shm_pct=0
+            if [ "$shm_tot" -gt 0 ]; then
+                shm_pct=$(( shm_used * 100 / shm_tot ))
+            fi
+
+            # 4. RAM Chunk State Queues
+            local wait_ext_cnt
+            wait_ext_cnt=$(find "$buf_dir" -maxdepth 1 -name '.waiting_ext_*' 2>/dev/null | wc -l || echo 0)
+            local wait_ext_bytes
+            wait_ext_bytes=$(find "$buf_dir" -maxdepth 1 -name '*.bin' ! -name '*.tmp' -exec stat -c%s {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
+            local ext_active_cnt
+            ext_active_cnt=$(find "$buf_dir" -maxdepth 1 -name '.ext_active_*' 2>/dev/null | wc -l || echo 0)
+            local ext_done_cnt
+            ext_done_cnt=$(find "$buf_dir" -maxdepth 1 -name '*.raw' 2>/dev/null | wc -l || echo 0)
+            local ext_done_bytes
+            ext_done_bytes=$(find "$buf_dir" -maxdepth 1 -name '*.raw' -exec stat -c%s {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
+
+            # 5. Extraction Throughput in RAM
+            local curr_ext_bytes
+            curr_ext_bytes=$(awk '{s+=$2} END {print s+0}' "${buf_dir}/.ext_stats" 2>/dev/null || echo 0)
+            local delta_ext=$(( curr_ext_bytes - prev_ext_bytes ))
+            local ext_speed=$(( delta_ext / delta_t ))
+            prev_ext_bytes="$curr_ext_bytes"
+            if [ "$ext_speed" -eq 0 ] && [ -f "${buf_dir}/.ext_stats" ]; then
+                ext_speed=$(tail -n 1 "${buf_dir}/.ext_stats" 2>/dev/null | awk '{if($4>$3 && ($4-$3)>0) printf "%d", ($2*1000)/($4-$3); else print 0}')
+            fi
+
+            # 6. Pipeline FIFO Injection Throughput
+            local curr_inj_bytes
+            curr_inj_bytes=$(awk '{s+=$2} END {print s+0}' "${buf_dir}/.pipe_stats" 2>/dev/null || echo 0)
+            local delta_inj=$(( curr_inj_bytes - prev_inj_bytes ))
+            local inj_speed=$(( delta_inj / delta_t ))
+            prev_inj_bytes="$curr_inj_bytes"
+            if [ "$inj_speed" -eq 0 ] && [ -f "${buf_dir}/.pipe_stats" ]; then
+                inj_speed=$(tail -n 1 "${buf_dir}/.pipe_stats" 2>/dev/null | awk '{if($4>$3 && ($4-$3)>0) printf "%d", ($2*1000)/($4-$3); else print 0}')
+            fi
+
+            # 7. Disk Write Speed
+            local curr_tar_io
+            curr_tar_io=$(get_tar_write_bytes "$tar_pid")
+            local delta_tar=$(( curr_tar_io - prev_tar_io ))
+            if [ "$delta_tar" -lt 0 ]; then delta_tar=0; fi
+            local disk_write_speed=$(( delta_tar / delta_t ))
+            prev_tar_io="$curr_tar_io"
+
+            # 8. Overall Shard Progress & Time Remaining
+            local prog_data
+            prog_data=$(cat "${buf_dir}/.progress_sync" 2>/dev/null || echo "0 0")
+            local done_cnt
+            done_cnt=$(echo "$prog_data" | awk '{print $1}')
+            local bytes_proc
+            bytes_proc=$(echo "$prog_data" | awk '{print $2}')
+            if [ -z "$done_cnt" ]; then done_cnt=0; fi
+            if [ -z "$bytes_proc" ]; then bytes_proc=0; fi
+            local pct=0
+            if [ "$total_chunks" -gt 0 ]; then
+                pct=$(( done_cnt * 100 / total_chunks ))
+            fi
+            local elapsed=$(( curr_time - start_t ))
+            if [ "$elapsed" -le 0 ]; then elapsed=1; fi
+            local avg_spd=$(( bytes_proc / elapsed ))
+            local eta_str="--:--"
+            if [ "$avg_spd" -gt 0 ] && [ "$bytes_proc" -lt "$total_comp_est" ]; then
+                local rem_b=$(( total_comp_est - bytes_proc ))
+                local rem_s=$(( rem_b / avg_spd ))
+                eta_str=$(printf "%02dm:%02ds" $(( rem_s / 60 )) $(( rem_s % 60 )))
+            fi
+
+            local rocks_dir="${SNAPCHAIN_DIR}/.rocks/shard-${shard_id}"
+            local rocks_sz=0
+            if [ -d "$rocks_dir" ]; then
+                rocks_sz=$(df -B1 "$rocks_dir" 2>/dev/null | awk 'NR==2 {print $3}' || echo 0)
+            fi
+
+            # 9. Intelligent Bottleneck Identification
+            local bottleneck_title
+            local bottleneck_desc
+
+            if [ "$ext_done_cnt" -gt 0 ] && { [ "$iowait_pct" -ge 15 ] || [ "$disk_write_speed" -lt 25000000 ]; }; then
+                bottleneck_title="DISK I/O BOUND"
+                bottleneck_desc="Storage write is saturated (I/O Wait: ${iowait_pct}%, Disk Write: $(format_speed "$disk_write_speed"))."
+            elif [ "$ext_active_cnt" -gt 0 ] && [ "$cpu_pct" -ge 85 ] && [ "$ext_done_cnt" -eq 0 ]; then
+                bottleneck_title="CPU DECOMPRESSION BOUND"
+                bottleneck_desc="pigz decompression is pegging CPU (${cpu_pct}% CPU | RAM Extract: $(format_speed "$ext_speed"))."
+            elif [ "$dl_active_cnt" -gt 0 ] && [ "$wait_ext_cnt" -eq 0 ] && [ "$ext_done_cnt" -eq 0 ] && [ "$ext_active_cnt" -eq 0 ]; then
+                bottleneck_title="NETWORK BANDWIDTH BOUND"
+                bottleneck_desc="Pipeline waiting on chunk downloads (Net: $(format_speed "$net_speed") | Active DL: ${dl_active_cnt})."
+            elif [ "$shm_pct" -ge 85 ]; then
+                bottleneck_title="RAM BUFFER CAPACITY BOUND"
+                bottleneck_desc="RAM buffer (/dev/shm) near capacity (${shm_pct}%). Throttling downloads to prevent OOM."
+            else
+                bottleneck_title="OPTIMAL STREAMING"
+                bottleneck_desc="Balanced throughput across Network, CPU Decompress, and NVMe/SSD Storage."
+            fi
+
+            # Build ASCII Progress Bar
+            local bar_width=20
+            local filled=$(( pct * bar_width / 100 ))
+            local unfilled=$(( bar_width - filled ))
+            local bar=""
+            for (( b=0; b<filled; b++ )); do bar="${bar}="; done
+            if [ "$filled" -lt "$bar_width" ]; then bar="${bar}>"; unfilled=$(( unfilled - 1 )); fi
+            for (( b=0; b<unfilled; b++ )); do bar="${bar} "; done
+
+            # Format 78-column Dashboard Block
+            local dash_out=""
+            dash_out+="${BLUE}┌────────────────────────────────────────────────────────────────────────────┐${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "SNAPCHAIN STREAMING PIPELINE - REAL-TIME OBSERVABILITY ENGINE")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "Shard ${shard_id}/${total_shards} [${bar}] ${pct}%" "ETA: ${eta_str} (${done_cnt}/${total_chunks} Chunks)")
+            dash_out+="\n"
+            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[NETWORK INGESTION]")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - Download Speed:  $(format_speed "$net_speed")" "Active Downloads:   ${dl_active_cnt} / 4 chunks")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - Ingested Volume: $(format_bytes "$bytes_proc")/$(format_bytes "$total_comp_est")" "Total Shard Chunks: ${total_chunks} chunks")
+            dash_out+="\n"
+            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[RAM EXTRACTION & DECOMPRESSION] (/dev/shm)")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - Decompressing:   ${ext_active_cnt} chunks" "RAM Extract Speed:  $(format_speed "$ext_speed")")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - Waiting Extract: ${wait_ext_cnt} chk ($(format_bytes "$wait_ext_bytes"))" "Extracted in RAM:   ${ext_done_cnt} chk ($(format_bytes "$ext_done_bytes"))")
+            dash_out+="\n"
+            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[PIPELINE & DISK STORAGE]")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - FIFO Injection:  $(format_speed "$inj_speed")" "Disk Write Speed:   $(format_speed "$disk_write_speed")")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - RocksDB Shard:   $(format_bytes "$rocks_sz") written" "Elapsed Time:       $(printf "%02dm:%02ds" $(( elapsed / 60 )) $(( elapsed % 60 )))")
+            dash_out+="\n"
+            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[HOST SYSTEM RESOURCES]")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - CPU Utilization: ${cpu_pct}%" "Storage I/O Wait:   ${iowait_pct}%")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  - System RAM:      $(format_bytes $(( mem_used_kb * 1024 ))) / $(format_bytes $(( mem_tot_kb * 1024 )))" "RAM Buffer:        $(format_bytes "$shm_used") (${shm_pct}%)")
+            dash_out+="\n"
+            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[BOTTLENECK DIAGNOSIS]")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  * Status: [${bottleneck_title}]")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  * Detail: ${bottleneck_desc}")
+            dash_out+="\n"
+            dash_out+="${BLUE}└────────────────────────────────────────────────────────────────────────────┘${NC}"
+
+            update_status "$dash_out"
+            prev_time="$curr_time"
+        done
+    }
+
+    # Start live observability background collector
+    collect_live_metrics "$SHARD_ID" "$TOTAL_CHUNKS" "$BUFFER_DIR" "$TAR_PID" "$START_TIME" &
+    METRICS_PID=$!
+
     refill_download_queue 0
 
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
@@ -565,7 +891,6 @@ for SHARD_ID in "${SHARDS[@]}"; do
         CURRENT_RAW="${BUFFER_DIR}/${CURRENT_CHUNK}.raw"
 
         # Wait for chunk i to finish downloading and pre-extracting
-        # Continuously refill download queue while waiting so download slots are never idle
         while [ -z "${TASK_PIDS[$i]:-}" ] || kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; do
             refill_download_queue "$i"
             if [ -n "${TASK_PIDS[$i]:-}" ] && ! kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; then
@@ -592,21 +917,38 @@ for SHARD_ID in "${SHARDS[@]}"; do
         CHUNK_SIZE=$(cat "${BUFFER_DIR}/.size_${i}" 2>/dev/null || echo 70209256)
         rm -f "${BUFFER_DIR}/.size_${i}" 2>/dev/null || true
 
+        T_INJ_START=$(date +%s%3N 2>/dev/null || date +%s)
+        RAW_BYTES_INJECTED=0
+
         # Feed to tar pipe: use pre-extracted raw chunk if available, otherwise decompress on-the-fly
         if [ -f "$CURRENT_RAW" ] && [ -s "$CURRENT_RAW" ]; then
+            RAW_BYTES_INJECTED=$(stat -c%s "$CURRENT_RAW" 2>/dev/null || echo 0)
             cat "$CURRENT_RAW" >&3
-            rm -f "$CURRENT_RAW" # Immediately delete extracted chunk from RAM after injection
+            rm -f "$CURRENT_RAW" 2>/dev/null || true
+            rm -f "${BUFFER_DIR}/.ext_done_${i}" 2>/dev/null || true
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
+            T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
+            echo "$i $RAW_BYTES_INJECTED $T_INJ_START $T_INJ_END" >> "${BUFFER_DIR}/.pipe_stats"
         elif [ -f "$CURRENT_FILE" ] && [ -s "$CURRENT_FILE" ]; then
+            rm -f "${BUFFER_DIR}/.waiting_ext_${i}" 2>/dev/null || true
+            touch "${BUFFER_DIR}/.ext_active_${i}"
             $DECOMPRESS_BIN "$CURRENT_FILE" >&3
-            rm -f "$CURRENT_FILE" # Immediately delete compressed chunk from RAM after injection
+            rm -f "${BUFFER_DIR}/.ext_active_${i}" 2>/dev/null || true
+            rm -f "$CURRENT_FILE" 2>/dev/null || true
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
+            T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
+            RAW_BYTES_INJECTED=$(( CHUNK_SIZE * 5 ))
+            echo "$i $RAW_BYTES_INJECTED $T_INJ_START $T_INJ_END" >> "${BUFFER_DIR}/.pipe_stats"
+            echo "$i $RAW_BYTES_INJECTED $T_INJ_START $T_INJ_END" >> "${BUFFER_DIR}/.ext_stats"
         else
             echo "[ERROR] Chunk file missing or empty: ${CURRENT_CHUNK}" >> "$LOG_FILE"
             echo "ERROR" > "$DONE_FILE"
             cleanup_resources
             exit 1
         fi
+
+        # Sync progress to background metrics collector
+        echo "$(( i + 1 )) $BYTES_PROCESSED" > "${BUFFER_DIR}/.progress_sync"
 
         if ! kill -0 "$TAR_PID" 2>/dev/null; then
             wait "$TAR_PID" 2>/dev/null
@@ -620,26 +962,6 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 exit 1
             fi
         fi
-
-        NOW=$(date +%s)
-        ELAPSED=$(( NOW - START_TIME ))
-        if [ "$ELAPSED" -gt 0 ]; then
-            CURR_SPEED=$(( BYTES_PROCESSED / ELAPSED ))
-        else
-            CURR_SPEED=0
-        fi
-
-        DONE_COUNT=$(( i + 1 ))
-        PERCENT=$(( DONE_COUNT * 100 / TOTAL_CHUNKS ))
-        RAM_BUFFERED=$(find "$BUFFER_DIR" -maxdepth 1 -type f ! -name '.*' 2>/dev/null | wc -l || echo 0)
-
-        PROGRESS_MSG=$(printf "  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Queue: %2d chunks | Elapsed: %02dm:%02ds" \
-            "$SHARD_ID" "$NUM_SHARDS" "$PERCENT" "$DONE_COUNT" "$TOTAL_CHUNKS" \
-            "$(format_bytes "$BYTES_PROCESSED")" "$(format_speed "$CURR_SPEED")" \
-            "$RAM_BUFFERED" \
-            $(( ELAPSED / 60 )) $(( ELAPSED % 60 )))
-
-        update_status "$PROGRESS_MSG"
 
         if [ "$TAR_COMPLETED" == "true" ]; then
             break
@@ -661,6 +983,14 @@ for SHARD_ID in "${SHARDS[@]}"; do
             exit 1
         fi
     fi
+
+    # Terminate background metrics collector cleanly for this shard
+    if [ -n "$METRICS_PID" ]; then
+        kill -9 "$METRICS_PID" 2>/dev/null || true
+        wait "$METRICS_PID" 2>/dev/null || true
+        METRICS_PID=""
+    fi
+
     rm -f "$PIPE_FIFO" 2>/dev/null || true
     rm -rf "$BUFFER_DIR" 2>/dev/null || true
 
@@ -726,15 +1056,37 @@ WORKER_SCRIPT_EOF
     trap handle_sigint INT TERM
 
     LAST_STATUS=""
+    FIRST_RENDER=true
+    PREV_LINE_COUNT=0
+    TICK=0
+
     while kill -0 "$WORKER_PID" 2>/dev/null; do
         if [ -f "$WORKER_STATUS_FILE" ]; then
-            STATUS_LINE=$(cat "$WORKER_STATUS_FILE" 2>/dev/null || echo "")
-            if [ -n "$STATUS_LINE" ] && [ "$STATUS_LINE" != "$LAST_STATUS" ]; then
-                printf "\r%b" "$STATUS_LINE"
-                LAST_STATUS="$STATUS_LINE"
+            STATUS_BLOCK=$(cat "$WORKER_STATUS_FILE" 2>/dev/null || echo "")
+            if [ -n "$STATUS_BLOCK" ] && [ "$STATUS_BLOCK" != "$LAST_STATUS" ]; then
+                if [ -t 1 ]; then
+                    CURR_LINES=$(echo -e "$STATUS_BLOCK" | wc -l)
+                    if [ "$FIRST_RENDER" == "true" ]; then
+                        printf "%b\n" "$STATUS_BLOCK"
+                        FIRST_RENDER=false
+                        PREV_LINE_COUNT=$CURR_LINES
+                    else
+                        # Move cursor up PREV_LINE_COUNT lines to overwrite in-place cleanly
+                        printf "\033[%dA\r%b\n" "$PREV_LINE_COUNT" "$STATUS_BLOCK"
+                        PREV_LINE_COUNT=$CURR_LINES
+                    fi
+                else
+                    # Non-interactive / log pipe mode: print periodic clean summary line
+                    TICK=$(( TICK + 1 ))
+                    if [ $(( TICK % 10 )) -eq 0 ]; then
+                        SUMMARY=$(echo -e "$STATUS_BLOCK" | grep -E "Shard|Status:|Download Speed" | tr -d '\n' | sed -e 's/[│┌├└─]//g' -e 's/  */ /g')
+                        echo "[SNAPSHOT SYNC] $SUMMARY"
+                    fi
+                fi
+                LAST_STATUS="$STATUS_BLOCK"
             fi
         fi
-        sleep 0.5
+        sleep 0.8
     done
 
     # Reset trap
