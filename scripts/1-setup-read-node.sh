@@ -392,10 +392,12 @@ update_status() {
 get_rx_bytes() {
     local sum=0
     for f in /sys/class/net/*/statistics/rx_bytes; do
-        if [[ "$f" != *"/lo/"* && "$f" != *"/docker"* && "$f" != *"/veth"* && "$f" != *"/br-"* ]]; then
+        if [ -f "$f" ] && [[ "$f" != *"/lo/"* && "$f" != *"/docker"* && "$f" != *"/veth"* && "$f" != *"/br-"* ]]; then
             local val
             val=$(cat "$f" 2>/dev/null || echo 0)
-            sum=$(( sum + val ))
+            if [[ "$val" =~ ^[0-9]+$ ]]; then
+                sum=$(( sum + val ))
+            fi
         fi
     done
     if [ "$sum" -eq 0 ] && [ -f /proc/net/dev ]; then
@@ -407,6 +409,7 @@ get_rx_bytes() {
 get_cpu_stat() {
     local u=0 n=0 s=0 id=0 io=0 irq=0 sirq=0 st=0
     read -r _ u n s id io irq sirq st _ < /proc/stat 2>/dev/null || true
+    u=${u:-0}; n=${n:-0}; s=${s:-0}; id=${id:-0}; io=${io:-0}; irq=${irq:-0}; sirq=${sirq:-0}; st=${st:-0}
     local tot=$(( u + n + s + id + io + irq + sirq + st ))
     local act=$(( tot - id - io ))
     echo "$tot $act $io"
@@ -415,8 +418,10 @@ get_cpu_stat() {
 get_mem_stat() {
     local tot
     local avail
-    tot=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
-    avail=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    tot=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    tot=${tot:-0}
+    avail=${avail:-0}
     local used=$(( tot - avail ))
     echo "$used $tot"
 }
@@ -424,12 +429,15 @@ get_mem_stat() {
 get_tar_write_bytes() {
     local pid="$1"
     local bytes=0
-    if [ -f "/proc/${pid}/io" ]; then
-        bytes=$(awk '/write_bytes:/ {print $2}' "/proc/${pid}/io" 2>/dev/null || echo 0)
+    if [ -n "$pid" ] && [ -f "/proc/${pid}/io" ]; then
+        bytes=$(awk '/^write_bytes:/ {print $2; exit}' "/proc/${pid}/io" 2>/dev/null || echo 0)
     fi
-    if [ "$bytes" -eq 0 ]; then
+    bytes=${bytes:-0}
+    if ! [[ "$bytes" =~ ^[0-9]+$ ]] || [ "$bytes" -eq 0 ]; then
         bytes=$(df -B1 "${SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk 'NR==2 {print $3}' || echo 0)
     fi
+    bytes=${bytes:-0}
+    if ! [[ "$bytes" =~ ^[0-9]+$ ]]; then bytes=0; fi
     echo "$bytes"
 }
 
@@ -661,6 +669,9 @@ for SHARD_ID in "${SHARDS[@]}"; do
         local avg_chunk_comp=70362152
         local total_comp_est=$(( total_chunks * avg_chunk_comp ))
 
+        # Send immediate initial status file so foreground monitor renders at second 0
+        update_status "${BLUE}┌────────────────────────────────────────────────────────────────────────────┐${NC}\n$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "SNAPCHAIN STREAMING PIPELINE - INITIALIZING OBSERVABILITY ENGINE...")\n${BLUE}└────────────────────────────────────────────────────────────────────────────┘${NC}"
+
         while kill -0 "$tar_pid" 2>/dev/null; do
             sleep 1
             local curr_time
@@ -797,23 +808,23 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
             if [ "$ext_done_cnt" -gt 0 ] && { [ "$iowait_pct" -ge 15 ] || [ "$disk_write_speed" -lt 25000000 ]; }; then
                 bottleneck_title="DISK I/O BOUND"
-                bottleneck_desc="Storage write is saturated (I/O Wait: ${iowait_pct}%, Disk Write: $(format_speed "$disk_write_speed"))."
+                bottleneck_desc="Storage write is saturated (I/O Wait: ${iowait_pct}%, Disk: $(format_speed "$disk_write_speed"))."
             elif [ "$ext_active_cnt" -gt 0 ] && [ "$cpu_pct" -ge 85 ] && [ "$ext_done_cnt" -eq 0 ]; then
                 bottleneck_title="CPU DECOMPRESSION BOUND"
-                bottleneck_desc="pigz decompression is pegging CPU (${cpu_pct}% CPU | RAM Extract: $(format_speed "$ext_speed"))."
+                bottleneck_desc="pigz decompression pegging CPU (${cpu_pct}% CPU | RAM Ext: $(format_speed "$ext_speed"))."
             elif [ "$dl_active_cnt" -gt 0 ] && [ "$wait_ext_cnt" -eq 0 ] && [ "$ext_done_cnt" -eq 0 ] && [ "$ext_active_cnt" -eq 0 ]; then
                 bottleneck_title="NETWORK BANDWIDTH BOUND"
                 bottleneck_desc="Pipeline waiting on chunk downloads (Net: $(format_speed "$net_speed") | Active DL: ${dl_active_cnt})."
             elif [ "$shm_pct" -ge 85 ]; then
                 bottleneck_title="RAM BUFFER CAPACITY BOUND"
-                bottleneck_desc="RAM buffer (/dev/shm) near capacity (${shm_pct}%). Throttling downloads to prevent OOM."
+                bottleneck_desc="RAM buffer (/dev/shm) near capacity (${shm_pct}%). Throttling downloads."
             else
                 bottleneck_title="OPTIMAL STREAMING"
                 bottleneck_desc="Balanced throughput across Network, CPU Decompress, and NVMe/SSD Storage."
             fi
 
-            # Build ASCII Progress Bar
-            local bar_width=20
+            # Build ASCII Progress Bar (18 chars)
+            local bar_width=18
             local filled=$(( pct * bar_width / 100 ))
             local unfilled=$(( bar_width - filled ))
             local bar=""
@@ -821,7 +832,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
             if [ "$filled" -lt "$bar_width" ]; then bar="${bar}>"; unfilled=$(( unfilled - 1 )); fi
             for (( b=0; b<unfilled; b++ )); do bar="${bar} "; done
 
-            # Format 78-column Dashboard Block
+            # Format 12-line Compact High-Precision Observability Dashboard
             local dash_out=""
             dash_out+="${BLUE}┌────────────────────────────────────────────────────────────────────────────┐${NC}\n"
             dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "SNAPCHAIN STREAMING PIPELINE - REAL-TIME OBSERVABILITY ENGINE")
@@ -830,47 +841,23 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 "Shard ${shard_id}/${total_shards} [${bar}] ${pct}%" "ETA: ${eta_str} (${done_cnt}/${total_chunks} Chunks)")
             dash_out+="\n"
             dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[NETWORK INGESTION]")
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  [NET] Speed:   $(format_speed "$net_speed") (${dl_active_cnt} DL)" "Total Ingested: $(format_bytes "$bytes_proc")/$(format_bytes "$total_comp_est")")
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - Download Speed:  $(format_speed "$net_speed")" "Active Downloads:   ${dl_active_cnt} / 4 chunks")
+                "  [RAM] Extract: $(format_speed "$ext_speed") (${ext_active_cnt} pigz)" "In-RAM: ${ext_done_cnt} raw ($(format_bytes "$ext_done_bytes")) | ${wait_ext_cnt} wait")
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - Ingested Volume: $(format_bytes "$bytes_proc")/$(format_bytes "$total_comp_est")" "Total Shard Chunks: ${total_chunks} chunks")
+                "  [PIPE] Inject: $(format_speed "$inj_speed")" "Disk Write:     $(format_speed "$disk_write_speed")")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  [DB]  RocksDB: $(format_bytes "$rocks_sz") written" "Elapsed Time:   $(printf "%02dm:%02ds" $(( elapsed / 60 )) $(( elapsed % 60 )))")
+            dash_out+="\n"
+            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
+                "  [SYS] CPU: ${cpu_pct}% | Storage Wait: ${iowait_pct}%" "RAM: $(format_bytes $(( mem_used_kb * 1024 )))/$(format_bytes $(( mem_tot_kb * 1024 ))) | Shm: $(format_bytes "$shm_used") (${shm_pct}%)")
             dash_out+="\n"
             dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[RAM EXTRACTION & DECOMPRESSION] (/dev/shm)")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - Decompressing:   ${ext_active_cnt} chunks" "RAM Extract Speed:  $(format_speed "$ext_speed")")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - Waiting Extract: ${wait_ext_cnt} chk ($(format_bytes "$wait_ext_bytes"))" "Extracted in RAM:   ${ext_done_cnt} chk ($(format_bytes "$ext_done_bytes"))")
-            dash_out+="\n"
-            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[PIPELINE & DISK STORAGE]")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - FIFO Injection:  $(format_speed "$inj_speed")" "Disk Write Speed:   $(format_speed "$disk_write_speed")")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - RocksDB Shard:   $(format_bytes "$rocks_sz") written" "Elapsed Time:       $(printf "%02dm:%02ds" $(( elapsed / 60 )) $(( elapsed % 60 )))")
-            dash_out+="\n"
-            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[HOST SYSTEM RESOURCES]")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - CPU Utilization: ${cpu_pct}%" "Storage I/O Wait:   ${iowait_pct}%")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  - System RAM:      $(format_bytes $(( mem_used_kb * 1024 ))) / $(format_bytes $(( mem_tot_kb * 1024 )))" "RAM Buffer:        $(format_bytes "$shm_used") (${shm_pct}%)")
-            dash_out+="\n"
-            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "[BOTTLENECK DIAGNOSIS]")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  * Status: [${bottleneck_title}]")
-            dash_out+="\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  * Detail: ${bottleneck_desc}")
+            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  ➤ [${bottleneck_title}] ${bottleneck_desc}")
             dash_out+="\n"
             dash_out+="${BLUE}└────────────────────────────────────────────────────────────────────────────┘${NC}"
 
@@ -1058,7 +1045,8 @@ WORKER_SCRIPT_EOF
     LAST_STATUS=""
     FIRST_RENDER=true
     PREV_LINE_COUNT=0
-    TICK=0
+
+    echo -e "  ${CYAN}• Connecting to real-time observability engine...${NC}\n"
 
     while kill -0 "$WORKER_PID" 2>/dev/null; do
         if [ -f "$WORKER_STATUS_FILE" ]; then
@@ -1071,16 +1059,14 @@ WORKER_SCRIPT_EOF
                         FIRST_RENDER=false
                         PREV_LINE_COUNT=$CURR_LINES
                     else
-                        # Move cursor up PREV_LINE_COUNT lines to overwrite in-place cleanly
                         printf "\033[%dA\r%b\n" "$PREV_LINE_COUNT" "$STATUS_BLOCK"
                         PREV_LINE_COUNT=$CURR_LINES
                     fi
                 else
-                    # Non-interactive / log pipe mode: print periodic clean summary line
-                    TICK=$(( TICK + 1 ))
-                    if [ $(( TICK % 10 )) -eq 0 ]; then
-                        SUMMARY=$(echo -e "$STATUS_BLOCK" | grep -E "Shard|Status:|Download Speed" | tr -d '\n' | sed -e 's/[│┌├└─]//g' -e 's/  */ /g')
-                        echo "[SNAPSHOT SYNC] $SUMMARY"
+                    # Non-interactive / log pipe mode: print clean progress line on each update
+                    SUMMARY=$(echo -e "$STATUS_BLOCK" | grep -E "Shard|Speed:|Extract:|FIFO|CPU" | tr -d '\n' | sed -e 's/[│┌├└─]//g' -e 's/  */ /g')
+                    if [ -n "$SUMMARY" ]; then
+                        echo "[SYNC] $SUMMARY"
                     fi
                 fi
                 LAST_STATUS="$STATUS_BLOCK"
