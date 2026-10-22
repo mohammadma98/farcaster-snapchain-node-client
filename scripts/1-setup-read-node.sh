@@ -422,6 +422,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         USABLE_SHM_MB=$(( SHM_AVAIL_MB - SAFETY_RESERVE_MB ))
         MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 75 ))
         [ "$MAX_BUFFERED_CHUNKS" -lt 2 ] && MAX_BUFFERED_CHUNKS=2
+        [ "$MAX_BUFFERED_CHUNKS" -gt 6 ] && MAX_BUFFERED_CHUNKS=6
         if [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
             CONCURRENT_DOWNLOADS=4
         else

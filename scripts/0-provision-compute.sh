@@ -353,7 +353,13 @@ detect_disk_medium() {
     fi
 
     if [ "$rota" -eq 1 ]; then
-        echo "D1:HDD:Rotational Mechanical Hard Disk"
+        # Check for virtualized storage (VirtIO / Xen / Cloud VMs)
+        # Hypervisors frequently default rotational=1 for virtio disks even when backed by enterprise NVMe/SSD
+        if [[ "$raw_dev" =~ ^(vd|xvd) ]]; then
+            echo "D2:SSD:VirtIO Cloud Solid-State Drive"
+        else
+            echo "D1:HDD:Rotational Mechanical Hard Disk"
+        fi
     else
         if [[ "$dev" =~ nvme ]] || [[ "$raw_dev" =~ nvme ]]; then
             echo "D3:NVMe:High-Performance PCIe NVMe Solid-State Drive"
