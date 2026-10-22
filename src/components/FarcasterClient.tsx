@@ -876,6 +876,17 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
   // 10. Toggle Like or Recast
   const handleToggleReaction = async (castHash: string, type: 'like' | 'recast', targetFid: number) => {
+    // Find prior active status to determine add vs remove
+    let wasActive = false;
+    const targetCast =
+      casts.find((c) => c.hash === castHash) ||
+      (currentThreadCast?.hash === castHash ? currentThreadCast : null) ||
+      threadReplies.find((c) => c.hash === castHash);
+
+    if (targetCast) {
+      wasActive = type === 'like' ? !!targetCast.reactions?.likedByMe : !!targetCast.reactions?.recastByMe;
+    }
+
     // Optimistic UI update
     const updateReactionInList = (list: FarcasterCast[]) =>
       list.map((c) => {
@@ -923,6 +934,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           targetFid,
           targetHash: castHash,
           type,
+          isRemove: wasActive,
           nodeUrl,
         }),
       });
@@ -1978,6 +1990,21 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           <span>Like</span>
                         </button>
                         <button
+                          onClick={() => {
+                            setQuoteCast(currentThreadCast);
+                            setActiveTab('feed');
+                            setTimeout(() => {
+                              const el = document.getElementById('composer-textarea');
+                              el?.focus();
+                            }, 100);
+                          }}
+                          className="flex items-center gap-1.5 text-xs p-2 rounded-xl hover:bg-purple-50 text-slate-500 hover:text-purple-700"
+                          title="Quote this cast"
+                        >
+                          <Quote className="h-4 w-4" />
+                          <span>Quote</span>
+                        </button>
+                        <button
                           onClick={() => handleShareCast(currentThreadCast)}
                           className="flex items-center gap-1.5 text-xs p-2 rounded-xl hover:bg-purple-50"
                         >
@@ -2359,6 +2386,20 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                   className={`h-3.5 w-3.5 ${cast.reactions?.likedByMe ? 'fill-current' : ''}`}
                                 />
                                 <span>{cast.reactions?.likesCount || 0}</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setQuoteCast(cast);
+                                  setActiveTab('feed');
+                                  setTimeout(() => {
+                                    const el = document.getElementById('composer-textarea');
+                                    el?.focus();
+                                  }, 100);
+                                }}
+                                className="flex items-center gap-1.5 text-xs hover:text-purple-700 transition-colors"
+                                title="Quote this cast"
+                              >
+                                <Quote className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={() => handleShareCast(cast)}
