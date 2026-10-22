@@ -425,10 +425,10 @@ for SHARD_ID in "${SHARDS[@]}"; do
     SAFETY_RESERVE_MB=600
 
     if [ "${SHM_AVAIL_MB:-0}" -ge 500 ]; then
-        # Dynamically scale buffer queue to use up to 65% of available RAM (max bandwidth saturation)
-        # Using 85 MB conservative chunk size estimate with a 600 MB live safety guard
-        USABLE_SHM_MB=$(( SHM_AVAIL_MB * 65 / 100 ))
-        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 85 ))
+        # Dynamically scale buffer queue to use up to 70% of available RAM (max bandwidth saturation)
+        # Using 80 MB conservative chunk size estimate with a 600 MB live safety guard
+        USABLE_SHM_MB=$(( SHM_AVAIL_MB * 70 / 100 ))
+        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 80 ))
         [ "$MAX_BUFFERED_CHUNKS" -lt 4 ] && MAX_BUFFERED_CHUNKS=4
 
         if [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
@@ -445,20 +445,22 @@ for SHARD_ID in "${SHARDS[@]}"; do
     fi
 
     # Multi-core accelerated decompression engine (pigz if present, fallback gzip)
+    CPU_CORES=$(nproc 2>/dev/null || echo 2)
     DECOMPRESS_BIN="gzip -dc"
     if command -v pigz &>/dev/null; then
-        DECOMPRESS_BIN="pigz -dc"
+        DECOMPRESS_BIN="pigz -dc -p ${CPU_CORES}"
     fi
 
     PIPE_FIFO="/tmp/snapchain_pipe_${SHARD_ID}_$$.fifo"
     rm -f "$PIPE_FIFO"
     mkfifo "$PIPE_FIFO"
 
-    tar -xf "$PIPE_FIFO" -C "${SNAPCHAIN_DIR}/.rocks" &
+    tar -b 2048 --no-same-owner -xf "$PIPE_FIFO" -C "${SNAPCHAIN_DIR}/.rocks" &
     TAR_PID=$!
     TAR_COMPLETED=false
 
     exec 3> "$PIPE_FIFO"
+    python3 -c "import fcntl; fcntl.fcntl(3, 1031, 1048576)" 2>/dev/null || true
 
     CHUNK_LIST=$(python3 -c "import json; print(' '.join(json.loads('''$META_DATA''')['chunks']))")
     CHUNK_ARRAY=($CHUNK_LIST)
