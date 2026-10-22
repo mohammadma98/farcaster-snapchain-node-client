@@ -529,6 +529,12 @@ if [ -f /etc/fstab ] && [ -n "$SELECTED_MOUNT" ]; then
     fi
 fi
 
+# Parallel Decompression Utility (pigz)
+if ! command -v pigz &> /dev/null && command -v apt-get &> /dev/null; then
+    echo -e "  • Installing parallel decompression engine (pigz) for multi-core snapshot acceleration..."
+    $SUDO apt-get update -qq && $SUDO apt-get install -y -qq pigz &>/dev/null || true
+fi
+
 # Docker Engine & Compose
 echo -e "  • Verifying Docker Engine & Container Runtime..."
 if ! command -v docker &> /dev/null; then

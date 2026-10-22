@@ -303,6 +303,12 @@ else
         echo -e "    ${CYAN}Notice: Worker runs as an independent daemon immune to SSH dropouts or terminal closure.${NC}"
         echo -e "    ${CYAN}Chunks are streamed through RAM (/dev/shm) directly into RocksDB (zero disk waste).${NC}\n"
 
+        # Accelerate multi-core decompression with pigz if available
+        if ! command -v pigz &>/dev/null && command -v apt-get &>/dev/null; then
+            echo -e "  • Provisioning multi-core decompression engine (pigz)..."
+            apt-get update -qq && apt-get install -y -qq pigz &>/dev/null || true
+        fi
+
         # Generate the self-contained detached worker daemon script
         cat <<'WORKER_SCRIPT_EOF' > "${SNAPCHAIN_DIR}/.snapshot_worker.sh"
 #!/usr/bin/env bash
@@ -416,13 +422,15 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
-    SAFETY_RESERVE_MB=350
+    SAFETY_RESERVE_MB=600
 
-    if [ "${SHM_AVAIL_MB:-0}" -ge $(( SAFETY_RESERVE_MB + 150 )) ]; then
-        USABLE_SHM_MB=$(( SHM_AVAIL_MB - SAFETY_RESERVE_MB ))
-        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 75 ))
-        [ "$MAX_BUFFERED_CHUNKS" -lt 2 ] && MAX_BUFFERED_CHUNKS=2
-        [ "$MAX_BUFFERED_CHUNKS" -gt 6 ] && MAX_BUFFERED_CHUNKS=6
+    if [ "${SHM_AVAIL_MB:-0}" -ge 500 ]; then
+        # Dynamically scale buffer queue to use up to 65% of available RAM (max bandwidth saturation)
+        # Using 85 MB conservative chunk size estimate with a 600 MB live safety guard
+        USABLE_SHM_MB=$(( SHM_AVAIL_MB * 65 / 100 ))
+        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 85 ))
+        [ "$MAX_BUFFERED_CHUNKS" -lt 4 ] && MAX_BUFFERED_CHUNKS=4
+
         if [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
             CONCURRENT_DOWNLOADS=4
         else
@@ -431,9 +439,15 @@ for SHARD_ID in "${SHARDS[@]}"; do
         mkdir -p "$BUFFER_DIR"
     else
         BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
-        MAX_BUFFERED_CHUNKS=3
+        MAX_BUFFERED_CHUNKS=4
         CONCURRENT_DOWNLOADS=2
         mkdir -p "$BUFFER_DIR"
+    fi
+
+    # Multi-core accelerated decompression engine (pigz if present, fallback gzip)
+    DECOMPRESS_BIN="gzip -dc"
+    if command -v pigz &>/dev/null; then
+        DECOMPRESS_BIN="pigz -dc"
     fi
 
     PIPE_FIFO="/tmp/snapchain_pipe_${SHARD_ID}_$$.fifo"
@@ -459,6 +473,13 @@ for SHARD_ID in "${SHARDS[@]}"; do
         local curr_extract_idx=$1
         while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
             if [ $(( NEXT_DOWNLOAD_IDX - curr_extract_idx )) -ge "$MAX_BUFFERED_CHUNKS" ]; then
+                break
+            fi
+
+            # Real-time memory watchdog: prevent ENOSPC / curl (23) by checking live available space
+            local live_avail_mb
+            live_avail_mb=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
+            if [ "${live_avail_mb:-0}" -lt "$SAFETY_RESERVE_MB" ]; then
                 break
             fi
 
@@ -503,7 +524,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
         if [ -s "$CURRENT_FILE" ]; then
             CHUNK_SIZE=$(stat -c%s "$CURRENT_FILE" 2>/dev/null || echo 70209256)
-            gzip -dc "$CURRENT_FILE" >&3
+            $DECOMPRESS_BIN "$CURRENT_FILE" >&3
             rm -f "$CURRENT_FILE"
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
         else
