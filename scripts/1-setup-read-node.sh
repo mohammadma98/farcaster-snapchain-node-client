@@ -577,6 +577,12 @@ for SHARD_ID in "${SHARDS[@]}"; do
     NEXT_DOWNLOAD_IDX=0
     NEXT_EXT_DISPATCH_IDX=0
 
+    # Detect curl HTTP/2 multiplexed parallel transfer capability
+    CURL_SUPPORTS_PARALLEL=false
+    if curl --help all 2>/dev/null | grep -q -- '--parallel'; then
+        CURL_SUPPORTS_PARALLEL=true
+    fi
+
     # Initialize state sync files in buffer directory
     echo "0 0" > "${BUFFER_DIR}/.progress_sync"
     : > "${BUFFER_DIR}/.ext_stats"
@@ -612,6 +618,53 @@ for SHARD_ID in "${SHARDS[@]}"; do
         return 1
     }
 
+    # Parallel HTTP/2 Connection-Pooling Batch Ingestor (reusing TLS sessions across chunks)
+    download_batch() {
+        local batch_indices=("$@")
+        local curl_args=()
+        local idx
+
+        for idx in "${batch_indices[@]}"; do
+            local chunk_name="${CHUNK_ARRAY[idx]}"
+            local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+            local comp_file="${BUFFER_DIR}/${chunk_name}"
+            touch "${BUFFER_DIR}/.dl_active_${idx}"
+            rm -f "${comp_file}.tmp" 2>/dev/null || true
+            curl_args+=( -o "${comp_file}.tmp" "$chunk_url" )
+        done
+
+        # Multiplexed parallel transfer reusing underlying TLS connections over HTTP/2
+        if curl -Z -fsSL --retry 3 --retry-connrefused --retry-delay 2 -m 180 "${curl_args[@]}" 2>/dev/null; then
+            for idx in "${batch_indices[@]}"; do
+                local chunk_name="${CHUNK_ARRAY[idx]}"
+                local comp_file="${BUFFER_DIR}/${chunk_name}"
+                local size_file="${BUFFER_DIR}/.size_${idx}"
+                if [ -s "${comp_file}.tmp" ]; then
+                    mv -f "${comp_file}.tmp" "$comp_file"
+                    stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
+                    rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+                    touch "${BUFFER_DIR}/.dl_done_${idx}"
+                else
+                    # Fallback to single chunk download if incomplete
+                    rm -f "${comp_file}.tmp" "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+                    local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+                    download_chunk "$idx" "$chunk_name" "$chunk_url"
+                fi
+            done
+        else
+            # Resilient fallback: download any missing chunk individually
+            for idx in "${batch_indices[@]}"; do
+                local chunk_name="${CHUNK_ARRAY[idx]}"
+                local comp_file="${BUFFER_DIR}/${chunk_name}"
+                rm -f "${comp_file}.tmp" "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+                if [ ! -f "${BUFFER_DIR}/.dl_done_${idx}" ]; then
+                    local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+                    download_chunk "$idx" "$chunk_name" "$chunk_url"
+                fi
+            done
+        fi
+    }
+
     refill_download_queue() {
         local curr_consume_idx="${1:-0}"
         local max_dl_horizon=$(( curr_consume_idx + MAX_DL_LOOKAHEAD ))
@@ -645,15 +698,43 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 fi
             done
 
-            if [ "$active_downloads" -ge "$CONCURRENT_DOWNLOADS" ]; then
+            local available_slots=$(( CONCURRENT_DOWNLOADS - active_downloads ))
+            if [ "$available_slots" -le 0 ]; then
                 break
             fi
 
-            local chunk_name="${CHUNK_ARRAY[NEXT_DOWNLOAD_IDX]}"
-            local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
-            download_chunk "$NEXT_DOWNLOAD_IDX" "$chunk_name" "$chunk_url" &
-            DL_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
-            NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + 1 ))
+            local remaining_horizon=$(( max_dl_horizon - NEXT_DOWNLOAD_IDX ))
+            if [ "$remaining_horizon" -le 0 ]; then
+                break
+            fi
+
+            if [ "$CURL_SUPPORTS_PARALLEL" = "true" ] && [ "$available_slots" -ge 2 ] && [ "$remaining_horizon" -ge 2 ]; then
+                # Determine batch size bounded by concurrency, horizon, and safe RAM lookahead (max 4 per batch)
+                local batch_size="$available_slots"
+                if [ "$batch_size" -gt "$remaining_horizon" ]; then batch_size="$remaining_horizon"; fi
+                if [ "$batch_size" -gt 4 ]; then batch_size=4; fi
+
+                local batch_indices=()
+                local b
+                for (( b=0; b<batch_size; b++ )); do
+                    batch_indices+=( "$(( NEXT_DOWNLOAD_IDX + b ))" )
+                done
+
+                download_batch "${batch_indices[@]}" &
+                local batch_pid=$!
+                local b_idx
+                for b_idx in "${batch_indices[@]}"; do
+                    DL_PIDS["$b_idx"]=$batch_pid
+                done
+                NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + batch_size ))
+            else
+                # Single chunk download (or fallback if 1 slot / older curl)
+                local chunk_name="${CHUNK_ARRAY[NEXT_DOWNLOAD_IDX]}"
+                local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+                download_chunk "$NEXT_DOWNLOAD_IDX" "$chunk_name" "$chunk_url" &
+                DL_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
+                NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + 1 ))
+            fi
         done
     }
 
