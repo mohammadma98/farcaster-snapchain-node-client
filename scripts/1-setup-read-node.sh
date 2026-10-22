@@ -422,7 +422,11 @@ for SHARD_ID in "${SHARDS[@]}"; do
         USABLE_SHM_MB=$(( SHM_AVAIL_MB - SAFETY_RESERVE_MB ))
         MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 75 ))
         [ "$MAX_BUFFERED_CHUNKS" -lt 2 ] && MAX_BUFFERED_CHUNKS=2
-        CONCURRENT_DOWNLOADS=3
+        if [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
+            CONCURRENT_DOWNLOADS=4
+        else
+            CONCURRENT_DOWNLOADS=3
+        fi
         mkdir -p "$BUFFER_DIR"
     else
         BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
