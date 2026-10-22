@@ -520,12 +520,12 @@ EOF
 
 echo -e "  ${GREEN}✓ Kernel sysctl parameters persisted to /etc/sysctl.d/99-snapchain.conf${NC}"
 
-# Mount Optimization (noatime to eliminate metadata writes on reads)
+# Mount Optimization (noatime & nodiratime to eliminate metadata writes on reads)
 if [ -f /etc/fstab ] && [ -n "$SELECTED_MOUNT" ]; then
     if ! grep -E "\s${SELECTED_MOUNT}\s.*noatime" /etc/fstab > /dev/null 2>&1; then
-        echo -e "  • Filesystem metadata optimization: applying noatime to ${SELECTED_MOUNT}..."
-        $SUDO mount -o remount,noatime "$SELECTED_MOUNT" 2>/dev/null || true
-        echo -e "    ${GREEN}✓ noatime active on ${SELECTED_MOUNT} (eliminates random write overhead on block reads).${NC}"
+        echo -e "  • Filesystem metadata optimization: applying noatime,nodiratime to ${SELECTED_MOUNT}..."
+        $SUDO mount -o remount,noatime,nodiratime "$SELECTED_MOUNT" 2>/dev/null || true
+        echo -e "    ${GREEN}✓ noatime,nodiratime active on ${SELECTED_MOUNT} (eliminates random write overhead on file & directory reads).${NC}"
     fi
 fi
 
