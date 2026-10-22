@@ -452,13 +452,17 @@ PIPE_FIFO=""
 TAR_PID=""
 METRICS_PID=""
 BUFFER_DIR=""
-declare -A TASK_PIDS=()
+declare -A DL_PIDS=()
+declare -A EXT_PIDS=()
 
 cleanup_resources() {
     exec 3>&- 2>/dev/null || true
     [ -n "$METRICS_PID" ] && kill -9 "$METRICS_PID" 2>/dev/null || true
     [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO" 2>/dev/null || true
-    for p in "${TASK_PIDS[@]}"; do
+    for p in "${DL_PIDS[@]}"; do
+        [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
+    done
+    for p in "${EXT_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
     [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true
@@ -504,22 +508,43 @@ for SHARD_ID in "${SHARDS[@]}"; do
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
     if [ ! -d /dev/shm ] || [ "${SHM_AVAIL_MB:-0}" -lt 200 ]; then
-        BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
+        if [ -d /run/shm ]; then
+            BUFFER_DIR="/run/shm/snapchain_shard_${SHARD_ID}_$$"
+        else
+            BUFFER_DIR="/tmp/snapchain_shard_${SHARD_ID}_$$"
+        fi
     fi
     mkdir -p "$BUFFER_DIR"
 
-    # Queue ceiling: maximum 6 chunks buffered in queue (regardless of available RAM)
-    MAX_BUFFERED_CHUNKS=6
-    # Concurrency ceiling: maximum 4 simultaneous downloads (regardless of CPU cores or available RAM)
+    # Multi-Core Adaptive Extraction Worker Pool (2 * CPU_CORES)
+    CPU_CORES=$(nproc 2>/dev/null || echo 1)
+    MAX_EXT_WORKERS=$(( CPU_CORES * 2 ))
+    if [ "$MAX_EXT_WORKERS" -lt 2 ]; then MAX_EXT_WORKERS=2; fi
+
+    # Network Ingestion Concurrency
     CONCURRENT_DOWNLOADS=4
 
-    # Multi-core accelerated decompression engine (pigz with fallback to gzip)
-    CPU_CORES=$(nproc 2>/dev/null || echo 2)
-    PIGZ_THREADS=$(( CPU_CORES * 2 ))
+    # High-efficiency 1-thread decompressor per pool worker to prevent thread thrashing
     DECOMPRESS_BIN="gzip -dc"
     if command -v pigz &>/dev/null; then
-        DECOMPRESS_BIN="pigz -dc -p ${PIGZ_THREADS}"
+        DECOMPRESS_BIN="pigz -dc -p 1"
     fi
+
+    # Dynamic RAM Headroom Thresholds (Never write to disk; pause on memory saturation)
+    MIN_FREE_RAM_MB=350
+    RESUME_FREE_RAM_MB=550
+
+    get_free_shm_mb() {
+        local shm_free
+        shm_free=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
+        local host_avail
+        host_avail=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 99999)
+        if [ "${shm_free:-0}" -lt "${host_avail:-0}" ]; then
+            echo "${shm_free:-0}"
+        else
+            echo "${host_avail:-0}"
+        fi
+    }
 
     PIPE_FIFO="/tmp/snapchain_pipe_${SHARD_ID}_$$.fifo"
     rm -f "$PIPE_FIFO"
@@ -538,101 +563,137 @@ for SHARD_ID in "${SHARDS[@]}"; do
     START_TIME=$(date +%s)
     BYTES_PROCESSED=0
 
-    declare -A TASK_PIDS=()
+    declare -A DL_PIDS=()
+    declare -A EXT_PIDS=()
     NEXT_DOWNLOAD_IDX=0
+    NEXT_EXT_DISPATCH_IDX=0
 
     # Initialize state sync files in buffer directory
     echo "0 0" > "${BUFFER_DIR}/.progress_sync"
     : > "${BUFFER_DIR}/.ext_stats"
     : > "${BUFFER_DIR}/.pipe_stats"
 
-    download_and_prep_chunk() {
+    # Stage 1: Network Ingestion Worker into RAM
+    download_chunk() {
         local idx="$1"
         local chunk_name="$2"
         local chunk_url="$3"
         local comp_file="${BUFFER_DIR}/${chunk_name}"
-        local raw_file="${BUFFER_DIR}/${chunk_name}.raw"
-        local dl_active="${BUFFER_DIR}/.dl_active_${idx}"
-        local dl_done="${BUFFER_DIR}/.dl_done_${idx}"
-        local wait_ext="${BUFFER_DIR}/.waiting_ext_${idx}"
-        local ext_active="${BUFFER_DIR}/.ext_active_${idx}"
-        local ext_done="${BUFFER_DIR}/.ext_done_${idx}"
         local size_file="${BUFFER_DIR}/.size_${idx}"
 
-        touch "$dl_active"
+        touch "${BUFFER_DIR}/.dl_active_${idx}"
 
-        # 1. Download chunk directly into RAM buffer
         if ! curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${comp_file}.tmp"; then
-            rm -f "$dl_active" 2>/dev/null || true
+            rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
             echo "[ERROR] Download failed for chunk ${chunk_name}" >> "$LOG_FILE"
             touch "${BUFFER_DIR}/.err_${idx}"
-            touch "$dl_done"
             return 1
         fi
 
         mv -f "${comp_file}.tmp" "$comp_file"
         stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
-        rm -f "$dl_active" 2>/dev/null || true
-        touch "$dl_done"   # Download slot freed for refill_download_queue
-        touch "$wait_ext"  # Chunk is in RAM, waiting for extraction
-
-        # 2. Extract in RAM, with fallback on low memory or failure
-        local avail_mb
-        avail_mb=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
-
-        if [ "${avail_mb:-0}" -ge 250 ]; then
-            rm -f "$wait_ext" 2>/dev/null || true
-            touch "$ext_active"
-            local t_ext_start
-            t_ext_start=$(date +%s%3N 2>/dev/null || date +%s)
-            if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
-                local t_ext_end
-                t_ext_end=$(date +%s%3N 2>/dev/null || date +%s)
-                mv -f "${raw_file}.tmp" "$raw_file"
-                rm -f "$comp_file" 2>/dev/null || true
-                rm -f "$ext_active" 2>/dev/null || true
-                touch "$ext_done"
-                local raw_sz
-                raw_sz=$(stat -c%s "$raw_file" 2>/dev/null || echo 0)
-                echo "$idx $raw_sz $t_ext_start $t_ext_end" >> "${BUFFER_DIR}/.ext_stats"
-            else
-                rm -f "${raw_file}.tmp" 2>/dev/null || true
-                rm -f "$ext_active" 2>/dev/null || true
-                touch "$wait_ext"
-            fi
-        fi
+        rm -f "${BUFFER_DIR}/.dl_active_${idx}" 2>/dev/null || true
+        touch "${BUFFER_DIR}/.dl_done_${idx}"
         return 0
     }
 
     refill_download_queue() {
-        local curr_extract_idx=$1
+        local curr_consume_idx=$1
         while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
-            # Max 6 chunks buffered in queue ahead of current extraction
-            if [ $(( NEXT_DOWNLOAD_IDX - curr_extract_idx )) -ge "$MAX_BUFFERED_CHUNKS" ]; then
+            # Dynamic RAM Backpressure Check: Never spill over to disk; pause if RAM headroom is low
+            local free_mb
+            free_mb=$(get_free_shm_mb)
+            if [ "${free_mb:-0}" -lt "$MIN_FREE_RAM_MB" ]; then
+                touch "${BUFFER_DIR}/.backpressure_paused"
                 break
+            else
+                if [ -f "${BUFFER_DIR}/.backpressure_paused" ]; then
+                    if [ "${free_mb:-0}" -ge "$RESUME_FREE_RAM_MB" ]; then
+                        rm -f "${BUFFER_DIR}/.backpressure_paused" 2>/dev/null || true
+                    else
+                        break
+                    fi
+                fi
             fi
 
-            # Count active downloads (tasks still in downloading phase before dl_done)
+            # Count active downloads
             local active_downloads=0
-            for idx in "${!TASK_PIDS[@]}"; do
-                local p="${TASK_PIDS[$idx]}"
+            for d_idx in "${!DL_PIDS[@]}"; do
+                local p="${DL_PIDS[$d_idx]}"
                 if kill -0 "$p" 2>/dev/null; then
-                    if [ ! -f "${BUFFER_DIR}/.dl_done_${idx}" ]; then
-                        active_downloads=$(( active_downloads + 1 ))
-                    fi
+                    active_downloads=$(( active_downloads + 1 ))
+                else
+                    unset DL_PIDS["$d_idx"]
                 fi
             done
 
-            # Limit concurrent downloads to 4
             if [ "$active_downloads" -ge "$CONCURRENT_DOWNLOADS" ]; then
                 break
             fi
 
             local chunk_name="${CHUNK_ARRAY[NEXT_DOWNLOAD_IDX]}"
             local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
-            download_and_prep_chunk "$NEXT_DOWNLOAD_IDX" "$chunk_name" "$chunk_url" &
-            TASK_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
+            download_chunk "$NEXT_DOWNLOAD_IDX" "$chunk_name" "$chunk_url" &
+            DL_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
             NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + 1 ))
+        done
+    }
+
+    # Stage 2: Independent Extraction Worker Pool (2 * CPU_CORES workers in RAM)
+    extract_chunk() {
+        local idx="$1"
+        local chunk_name="${CHUNK_ARRAY[idx]}"
+        local comp_file="${BUFFER_DIR}/${chunk_name}"
+        local raw_file="${BUFFER_DIR}/${chunk_name}.raw"
+
+        touch "${BUFFER_DIR}/.ext_active_${idx}"
+        local t_start
+        t_start=$(date +%s%3N 2>/dev/null || date +%s)
+
+        if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
+            local t_end
+            t_end=$(date +%s%3N 2>/dev/null || date +%s)
+            mv -f "${raw_file}.tmp" "$raw_file"
+            rm -f "$comp_file" 2>/dev/null || true           # INSTANT DELETION OF COMPRESSED CHUNK FROM RAM
+            rm -f "${BUFFER_DIR}/.dl_done_${idx}" 2>/dev/null || true
+            rm -f "${BUFFER_DIR}/.ext_active_${idx}" 2>/dev/null || true
+            touch "${BUFFER_DIR}/.ext_done_${idx}"
+            local raw_sz
+            raw_sz=$(stat -c%s "$raw_file" 2>/dev/null || echo 0)
+            echo "$idx $raw_sz $t_start $t_end" >> "${BUFFER_DIR}/.ext_stats"
+        else
+            rm -f "${raw_file}.tmp" 2>/dev/null || true
+            rm -f "${BUFFER_DIR}/.ext_active_${idx}" 2>/dev/null || true
+        fi
+        return 0
+    }
+
+    dispatch_extraction_workers() {
+        # Purge completed extraction workers from table
+        local active_ext=0
+        for e_idx in "${!EXT_PIDS[@]}"; do
+            local p="${EXT_PIDS[$e_idx]}"
+            if kill -0 "$p" 2>/dev/null; then
+                active_ext=$(( active_ext + 1 ))
+            else
+                unset EXT_PIDS["$e_idx"]
+            fi
+        done
+
+        # Dispatch ready chunks between dispatch pointer and downloaded horizon
+        local scan_idx="$NEXT_EXT_DISPATCH_IDX"
+        while [ "$active_ext" -lt "$MAX_EXT_WORKERS" ] && [ "$scan_idx" -lt "$NEXT_DOWNLOAD_IDX" ]; do
+            if [ -f "${BUFFER_DIR}/.dl_done_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${scan_idx}" ]; then
+                extract_chunk "$scan_idx" &
+                EXT_PIDS["$scan_idx"]=$!
+                active_ext=$(( active_ext + 1 ))
+            fi
+            scan_idx=$(( scan_idx + 1 ))
+        done
+
+        # Advance NEXT_EXT_DISPATCH_IDX past already processed chunks
+        while [ "$NEXT_EXT_DISPATCH_IDX" -lt "$TOTAL_CHUNKS" ] && [ -f "${BUFFER_DIR}/.ext_done_${NEXT_EXT_DISPATCH_IDX}" ]; do
+            NEXT_EXT_DISPATCH_IDX=$(( NEXT_EXT_DISPATCH_IDX + 1 ))
         done
     }
 
@@ -735,15 +796,19 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
             # 4. RAM Chunk State Queues
             local wait_ext_cnt
-            wait_ext_cnt=$(find "$buf_dir" -maxdepth 1 -name '.waiting_ext_*' 2>/dev/null | wc -l || echo 0)
+            wait_ext_cnt=$(find "$buf_dir" -maxdepth 1 -name '.dl_done_*' 2>/dev/null | wc -l || echo 0)
             local wait_ext_bytes
             wait_ext_bytes=$(find "$buf_dir" -maxdepth 1 -name '*.bin' ! -name '*.tmp' -exec stat -c%s {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
             local ext_active_cnt
             ext_active_cnt=$(find "$buf_dir" -maxdepth 1 -name '.ext_active_*' 2>/dev/null | wc -l || echo 0)
             local ext_done_cnt
-            ext_done_cnt=$(find "$buf_dir" -maxdepth 1 -name '*.raw' 2>/dev/null | wc -l || echo 0)
+            ext_done_cnt=$(find "$buf_dir" -maxdepth 1 -name '*.raw' ! -name '*.tmp' 2>/dev/null | wc -l || echo 0)
             local ext_done_bytes
-            ext_done_bytes=$(find "$buf_dir" -maxdepth 1 -name '*.raw' -exec stat -c%s {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
+            ext_done_bytes=$(find "$buf_dir" -maxdepth 1 -name '*.raw' ! -name '*.tmp' -exec stat -c%s {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
+            local is_ram_paused=false
+            if [ -f "${buf_dir}/.backpressure_paused" ]; then
+                is_ram_paused=true
+            fi
 
             # 5. Extraction Throughput in RAM
             local curr_ext_bytes
@@ -806,12 +871,15 @@ for SHARD_ID in "${SHARDS[@]}"; do
             local bottleneck_title
             local bottleneck_desc
 
-            if [ "$ext_done_cnt" -gt 0 ] && { [ "$iowait_pct" -ge 15 ] || [ "$disk_write_speed" -lt 25000000 ]; }; then
+            if [ "$is_ram_paused" == "true" ]; then
+                bottleneck_title="RAM BACKPRESSURE (DOWNLOAD PAUSED)"
+                bottleneck_desc="RAM buffer reached safety headroom limit. Pausing download to preserve host memory."
+            elif [ "$ext_done_cnt" -gt 0 ] && { [ "$iowait_pct" -ge 15 ] || [ "$disk_write_speed" -lt 25000000 ]; }; then
                 bottleneck_title="DISK I/O BOUND"
                 bottleneck_desc="Storage write is saturated (I/O Wait: ${iowait_pct}%, Disk: $(format_speed "$disk_write_speed"))."
             elif [ "$ext_active_cnt" -gt 0 ] && [ "$cpu_pct" -ge 85 ] && [ "$ext_done_cnt" -eq 0 ]; then
                 bottleneck_title="CPU DECOMPRESSION BOUND"
-                bottleneck_desc="pigz decompression pegging CPU (${cpu_pct}% CPU | RAM Ext: $(format_speed "$ext_speed"))."
+                bottleneck_desc="Decompression pool (${ext_active_cnt}/${MAX_EXT_WORKERS} workers) utilizing CPU (${cpu_pct}% CPU)."
             elif [ "$dl_active_cnt" -gt 0 ] && [ "$wait_ext_cnt" -eq 0 ] && [ "$ext_done_cnt" -eq 0 ] && [ "$ext_active_cnt" -eq 0 ]; then
                 bottleneck_title="NETWORK BANDWIDTH BOUND"
                 bottleneck_desc="Pipeline waiting on chunk downloads (Net: $(format_speed "$net_speed") | Active DL: ${dl_active_cnt})."
@@ -820,7 +888,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 bottleneck_desc="RAM buffer (/dev/shm) near capacity (${shm_pct}%). Throttling downloads."
             else
                 bottleneck_title="OPTIMAL STREAMING"
-                bottleneck_desc="Balanced throughput across Network, CPU Decompress, and NVMe/SSD Storage."
+                bottleneck_desc="Balanced throughput across Network, CPU Decompress (${ext_active_cnt}/${MAX_EXT_WORKERS} wrk), and Storage."
             fi
 
             # Build ASCII Progress Bar (18 chars)
@@ -845,7 +913,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 "  [NET] Speed:   $(format_speed "$net_speed") (${dl_active_cnt} DL)" "Total Ingested: $(format_bytes "$bytes_proc")/$(format_bytes "$total_comp_est")")
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "  [RAM] Extract: $(format_speed "$ext_speed") (${ext_active_cnt} pigz)" "In-RAM: ${ext_done_cnt} raw ($(format_bytes "$ext_done_bytes")) | ${wait_ext_cnt} wait")
+                "  [RAM] Extract: $(format_speed "$ext_speed") (${ext_active_cnt}/${MAX_EXT_WORKERS} wrk)" "In-RAM: ${ext_done_cnt} raw ($(format_bytes "$ext_done_bytes")) | ${wait_ext_cnt} queue")
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
                 "  [PIPE] Inject: $(format_speed "$inj_speed")" "Disk Write:     $(format_speed "$disk_write_speed")")
@@ -871,35 +939,39 @@ for SHARD_ID in "${SHARDS[@]}"; do
     METRICS_PID=$!
 
     refill_download_queue 0
+    dispatch_extraction_workers
 
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
         CURRENT_CHUNK="${CHUNK_ARRAY[i]}"
         CURRENT_FILE="${BUFFER_DIR}/${CURRENT_CHUNK}"
         CURRENT_RAW="${BUFFER_DIR}/${CURRENT_CHUNK}.raw"
 
-        # Wait for chunk i to finish downloading and pre-extracting
-        while [ -z "${TASK_PIDS[$i]:-}" ] || kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; do
+        # Coordinate downloads and extractions until chunk i is extracted in RAM
+        while [ ! -f "${BUFFER_DIR}/.ext_done_${i}" ]; do
             refill_download_queue "$i"
-            if [ -n "${TASK_PIDS[$i]:-}" ] && ! kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; then
+            dispatch_extraction_workers
+
+            if [ -f "${BUFFER_DIR}/.err_${i}" ]; then
+                echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
+                echo "ERROR" > "$DONE_FILE"
+                cleanup_resources
+                exit 1
+            fi
+
+            # Expedite chunk i if downloaded but not yet picked up by extraction pool
+            if [ -f "${BUFFER_DIR}/.dl_done_${i}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${i}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${i}" ]; then
+                extract_chunk "$i" &
+                EXT_PIDS["$i"]=$!
+            fi
+
+            if [ -f "${BUFFER_DIR}/.ext_done_${i}" ]; then
                 break
             fi
-            sleep 0.1
+            sleep 0.05
         done
 
-        if [ -n "${TASK_PIDS[$i]:-}" ]; then
-            wait "${TASK_PIDS[$i]}" 2>/dev/null || true
-            unset TASK_PIDS["$i"]
-        fi
-        rm -f "${BUFFER_DIR}/.dl_done_${i}" 2>/dev/null || true
-
-        if [ -f "${BUFFER_DIR}/.err_${i}" ]; then
-            echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
-            echo "ERROR" > "$DONE_FILE"
-            cleanup_resources
-            exit 1
-        fi
-
         refill_download_queue "$i"
+        dispatch_extraction_workers
 
         CHUNK_SIZE=$(cat "${BUFFER_DIR}/.size_${i}" 2>/dev/null || echo 70209256)
         rm -f "${BUFFER_DIR}/.size_${i}" 2>/dev/null || true
@@ -907,21 +979,18 @@ for SHARD_ID in "${SHARDS[@]}"; do
         T_INJ_START=$(date +%s%3N 2>/dev/null || date +%s)
         RAW_BYTES_INJECTED=0
 
-        # Feed to tar pipe: use pre-extracted raw chunk if available, otherwise decompress on-the-fly
+        # Feed to tar pipe: use pre-extracted raw chunk from RAM and immediately reclaim memory
         if [ -f "$CURRENT_RAW" ] && [ -s "$CURRENT_RAW" ]; then
             RAW_BYTES_INJECTED=$(stat -c%s "$CURRENT_RAW" 2>/dev/null || echo 0)
             cat "$CURRENT_RAW" >&3
-            rm -f "$CURRENT_RAW" 2>/dev/null || true
-            rm -f "${BUFFER_DIR}/.ext_done_${i}" 2>/dev/null || true
+            rm -f "$CURRENT_RAW" "${BUFFER_DIR}/.ext_done_${i}" 2>/dev/null || true   # INSTANT RAM RECLAMATION
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
             T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
             echo "$i $RAW_BYTES_INJECTED $T_INJ_START $T_INJ_END" >> "${BUFFER_DIR}/.pipe_stats"
         elif [ -f "$CURRENT_FILE" ] && [ -s "$CURRENT_FILE" ]; then
-            rm -f "${BUFFER_DIR}/.waiting_ext_${i}" 2>/dev/null || true
-            touch "${BUFFER_DIR}/.ext_active_${i}"
+            # Emergency on-the-fly decompression directly into pipe
             $DECOMPRESS_BIN "$CURRENT_FILE" >&3
-            rm -f "${BUFFER_DIR}/.ext_active_${i}" 2>/dev/null || true
-            rm -f "$CURRENT_FILE" 2>/dev/null || true
+            rm -f "$CURRENT_FILE" "${BUFFER_DIR}/.dl_done_${i}" 2>/dev/null || true
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
             T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
             RAW_BYTES_INJECTED=$(( CHUNK_SIZE * 5 ))
@@ -955,7 +1024,10 @@ for SHARD_ID in "${SHARDS[@]}"; do
         fi
     done
 
-    for p in "${TASK_PIDS[@]}"; do
+    for p in "${DL_PIDS[@]}"; do
+        [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
+    done
+    for p in "${EXT_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
 
