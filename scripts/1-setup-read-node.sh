@@ -323,7 +323,7 @@ else
     if [ "$IS_RUNNING" == "true" ]; then
         echo -e "  ${GREEN}✓ Active Background Snapshot Pipeline detected (PID: ${WORKER_PID}).${NC}"
         echo -e "    ${CYAN}Notice: The pipeline is running in a detached background worker independent of this SSH session.${NC}"
-        echo -e "    ${CYAN}Tip: You can safely detach anytime with Ctrl+C; the download will keep running.${NC}\n"
+        echo -e "    ${CYAN}Tip: Press Ctrl+C at any time to detach or stop the sync.${NC}\n"
     else
         echo -e "  • Starting Detached RAM-Assisted Concurrent Streaming Pipeline..."
         echo -e "    ${CYAN}Notice: Worker runs as an independent daemon immune to SSH dropouts or terminal closure.${NC}"
@@ -340,8 +340,8 @@ else
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Ignore SIGHUP so closing the SSH session never interrupts the pipeline
-trap '' HUP
+# Ignore SIGHUP and SIGINT so closing the terminal or pressing Ctrl+C in monitor never interrupts the daemon
+trap '' HUP INT
 
 SNAPCHAIN_DIR="${1:-${HOME}/snapchain}"
 STATUS_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.status"
@@ -399,18 +399,19 @@ mkdir -p "${SNAPCHAIN_DIR}/.rocks"
 PIPE_FIFO=""
 TAR_PID=""
 BUFFER_DIR=""
-declare -A DOWNLOAD_PIDS=()
+declare -A TASK_PIDS=()
 
 cleanup_resources() {
     exec 3>&- 2>/dev/null || true
     [ -n "$PIPE_FIFO" ] && rm -f "$PIPE_FIFO" 2>/dev/null || true
-    for p in "${DOWNLOAD_PIDS[@]}"; do
+    for p in "${TASK_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
     [ -n "$TAR_PID" ] && kill -9 "$TAR_PID" 2>/dev/null || true
     [ -n "$BUFFER_DIR" ] && rm -rf "$BUFFER_DIR" 2>/dev/null || true
 }
-trap cleanup_resources INT TERM
+# Only clean up on SIGTERM (explicit termination request from monitor or system shutdown)
+trap cleanup_resources TERM
 
 for SHARD_ID in "${SHARDS[@]}"; do
     SHARD_DIR="${SNAPCHAIN_DIR}/.rocks/shard-${SHARD_ID}"
@@ -448,33 +449,17 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
     BUFFER_DIR="/dev/shm/snapchain_shard_${SHARD_ID}_$$"
     SHM_AVAIL_MB=$(df -BM /dev/shm 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
-    SAFETY_RESERVE_MB=600
-
-    if [ "${SHM_AVAIL_MB:-0}" -ge 500 ]; then
-        # Dynamically scale buffer queue to use up to 70% of available RAM (max bandwidth saturation)
-        # Using 80 MB conservative chunk size estimate with a 600 MB live safety guard
-        USABLE_SHM_MB=$(( SHM_AVAIL_MB * 70 / 100 ))
-        MAX_BUFFERED_CHUNKS=$(( USABLE_SHM_MB / 80 ))
-        [ "$MAX_BUFFERED_CHUNKS" -lt 4 ] && MAX_BUFFERED_CHUNKS=4
-
-        if [ "${SHM_AVAIL_MB:-0}" -ge 3000 ]; then
-            CONCURRENT_DOWNLOADS=8
-        elif [ "${SHM_AVAIL_MB:-0}" -ge 1500 ]; then
-            CONCURRENT_DOWNLOADS=6
-        elif [ "${SHM_AVAIL_MB:-0}" -gt 1024 ]; then
-            CONCURRENT_DOWNLOADS=4
-        else
-            CONCURRENT_DOWNLOADS=3
-        fi
-        mkdir -p "$BUFFER_DIR"
-    else
+    if [ ! -d /dev/shm ] || [ "${SHM_AVAIL_MB:-0}" -lt 200 ]; then
         BUFFER_DIR="${SNAPCHAIN_DIR}/.chunks_tmp_${SHARD_ID}"
-        MAX_BUFFERED_CHUNKS=4
-        CONCURRENT_DOWNLOADS=2
-        mkdir -p "$BUFFER_DIR"
     fi
+    mkdir -p "$BUFFER_DIR"
 
-    # Multi-core accelerated decompression engine (pigz with 2x thread over-subscription, fallback gzip)
+    # Queue ceiling: maximum 6 chunks buffered in queue (regardless of available RAM)
+    MAX_BUFFERED_CHUNKS=6
+    # Concurrency ceiling: maximum 4 simultaneous downloads (regardless of CPU cores or available RAM)
+    CONCURRENT_DOWNLOADS=4
+
+    # Multi-core accelerated decompression engine (pigz with fallback to gzip)
     CPU_CORES=$(nproc 2>/dev/null || echo 2)
     PIGZ_THREADS=$(( CPU_CORES * 2 ))
     DECOMPRESS_BIN="gzip -dc"
@@ -499,38 +484,75 @@ for SHARD_ID in "${SHARDS[@]}"; do
     START_TIME=$(date +%s)
     BYTES_PROCESSED=0
 
-    declare -A DOWNLOAD_PIDS=()
+    declare -A TASK_PIDS=()
     NEXT_DOWNLOAD_IDX=0
+
+    download_and_prep_chunk() {
+        local idx="$1"
+        local chunk_name="$2"
+        local chunk_url="$3"
+        local comp_file="${BUFFER_DIR}/${chunk_name}"
+        local raw_file="${BUFFER_DIR}/${chunk_name}.raw"
+        local dl_marker="${BUFFER_DIR}/.dl_done_${idx}"
+        local size_file="${BUFFER_DIR}/.size_${idx}"
+
+        # 1. Download chunk directly into RAM buffer
+        if ! curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${comp_file}.tmp"; then
+            echo "[ERROR] Download failed for chunk ${chunk_name}" >> "$LOG_FILE"
+            touch "${BUFFER_DIR}/.err_${idx}"
+            touch "$dl_marker"
+            return 1
+        fi
+
+        mv -f "${comp_file}.tmp" "$comp_file"
+        stat -c%s "$comp_file" > "$size_file" 2>/dev/null || echo 70209256 > "$size_file"
+        touch "$dl_marker" # Signal download completion to free download slot for next chunk
+
+        # 2. Extract immediately in RAM, with graceful fallback on low memory or failure
+        local avail_mb
+        avail_mb=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
+
+        # Require ~250MB free RAM headroom to safely extract raw uncompressed chunk
+        if [ "${avail_mb:-0}" -ge 250 ]; then
+            if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
+                mv -f "${raw_file}.tmp" "$raw_file"
+                rm -f "$comp_file" # Delete original compressed chunk from RAM, replaced by extracted data
+            else
+                rm -f "${raw_file}.tmp" 2>/dev/null || true
+                # Low memory or decompress error: keep $comp_file intact for on-the-fly decompression
+            fi
+        fi
+        return 0
+    }
 
     refill_download_queue() {
         local curr_extract_idx=$1
         while [ "$NEXT_DOWNLOAD_IDX" -lt "$TOTAL_CHUNKS" ]; do
+            # Max 6 chunks buffered in queue ahead of current extraction
             if [ $(( NEXT_DOWNLOAD_IDX - curr_extract_idx )) -ge "$MAX_BUFFERED_CHUNKS" ]; then
                 break
             fi
 
-            # Real-time memory watchdog: prevent ENOSPC / curl (23) by checking live available space
-            local live_avail_mb
-            live_avail_mb=$(df -BM "$BUFFER_DIR" 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'M' || echo 0)
-            if [ "${live_avail_mb:-0}" -lt "$SAFETY_RESERVE_MB" ]; then
-                break
-            fi
-
-            local active=0
-            for p in "${DOWNLOAD_PIDS[@]}"; do
+            # Count active downloads (tasks still in downloading phase before dl_marker)
+            local active_downloads=0
+            for idx in "${!TASK_PIDS[@]}"; do
+                local p="${TASK_PIDS[$idx]}"
                 if kill -0 "$p" 2>/dev/null; then
-                    active=$(( active + 1 ))
+                    if [ ! -f "${BUFFER_DIR}/.dl_done_${idx}" ]; then
+                        active_downloads=$(( active_downloads + 1 ))
+                    fi
                 fi
             done
 
-            if [ "$active" -ge "$CONCURRENT_DOWNLOADS" ]; then
+            # Limit concurrent downloads to 4
+            if [ "$active_downloads" -ge "$CONCURRENT_DOWNLOADS" ]; then
                 break
             fi
 
             local chunk_name="${CHUNK_ARRAY[NEXT_DOWNLOAD_IDX]}"
             local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
-            curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 "$chunk_url" -o "${BUFFER_DIR}/${chunk_name}" &
-            DOWNLOAD_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
+            download_and_prep_chunk "$NEXT_DOWNLOAD_IDX" "$chunk_name" "$chunk_url" &
+            TASK_PIDS["$NEXT_DOWNLOAD_IDX"]=$!
             NEXT_DOWNLOAD_IDX=$(( NEXT_DOWNLOAD_IDX + 1 ))
         done
     }
@@ -540,25 +562,44 @@ for SHARD_ID in "${SHARDS[@]}"; do
     for (( i=0; i<TOTAL_CHUNKS; i++ )); do
         CURRENT_CHUNK="${CHUNK_ARRAY[i]}"
         CURRENT_FILE="${BUFFER_DIR}/${CURRENT_CHUNK}"
+        CURRENT_RAW="${BUFFER_DIR}/${CURRENT_CHUNK}.raw"
 
-        refill_download_queue "$i"
+        # Wait for chunk i to finish downloading and pre-extracting
+        # Continuously refill download queue while waiting so download slots are never idle
+        while [ -z "${TASK_PIDS[$i]:-}" ] || kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; do
+            refill_download_queue "$i"
+            if [ -n "${TASK_PIDS[$i]:-}" ] && ! kill -0 "${TASK_PIDS[$i]}" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
 
-        if [ -n "${DOWNLOAD_PIDS[$i]:-}" ]; then
-            wait "${DOWNLOAD_PIDS[$i]}" || {
-                echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
-                echo "ERROR" > "$DONE_FILE"
-                cleanup_resources
-                exit 1
-            }
-            unset DOWNLOAD_PIDS["$i"]
+        if [ -n "${TASK_PIDS[$i]:-}" ]; then
+            wait "${TASK_PIDS[$i]}" 2>/dev/null || true
+            unset TASK_PIDS["$i"]
+        fi
+        rm -f "${BUFFER_DIR}/.dl_done_${i}" 2>/dev/null || true
+
+        if [ -f "${BUFFER_DIR}/.err_${i}" ]; then
+            echo "[ERROR] Download failed for chunk ${CURRENT_CHUNK}" >> "$LOG_FILE"
+            echo "ERROR" > "$DONE_FILE"
+            cleanup_resources
+            exit 1
         fi
 
         refill_download_queue "$i"
 
-        if [ -s "$CURRENT_FILE" ]; then
-            CHUNK_SIZE=$(stat -c%s "$CURRENT_FILE" 2>/dev/null || echo 70209256)
+        CHUNK_SIZE=$(cat "${BUFFER_DIR}/.size_${i}" 2>/dev/null || echo 70209256)
+        rm -f "${BUFFER_DIR}/.size_${i}" 2>/dev/null || true
+
+        # Feed to tar pipe: use pre-extracted raw chunk if available, otherwise decompress on-the-fly
+        if [ -f "$CURRENT_RAW" ] && [ -s "$CURRENT_RAW" ]; then
+            cat "$CURRENT_RAW" >&3
+            rm -f "$CURRENT_RAW" # Immediately delete extracted chunk from RAM after injection
+            BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
+        elif [ -f "$CURRENT_FILE" ] && [ -s "$CURRENT_FILE" ]; then
             $DECOMPRESS_BIN "$CURRENT_FILE" >&3
-            rm -f "$CURRENT_FILE"
+            rm -f "$CURRENT_FILE" # Immediately delete compressed chunk from RAM after injection
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
         else
             echo "[ERROR] Chunk file missing or empty: ${CURRENT_CHUNK}" >> "$LOG_FILE"
@@ -590,7 +631,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
 
         DONE_COUNT=$(( i + 1 ))
         PERCENT=$(( DONE_COUNT * 100 / TOTAL_CHUNKS ))
-        RAM_BUFFERED=$(ls -1 "$BUFFER_DIR" 2>/dev/null | wc -l || echo 0)
+        RAM_BUFFERED=$(find "$BUFFER_DIR" -maxdepth 1 -type f ! -name '.*' 2>/dev/null | wc -l || echo 0)
 
         PROGRESS_MSG=$(printf "  ${CYAN}➤ Shard %d/%d:${NC} [%3d%%] %4d/%d Chunks | %s | %s | Queue: %2d chunks | Elapsed: %02dm:%02ds" \
             "$SHARD_ID" "$NUM_SHARDS" "$PERCENT" "$DONE_COUNT" "$TOTAL_CHUNKS" \
@@ -605,7 +646,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         fi
     done
 
-    for p in "${DOWNLOAD_PIDS[@]}"; do
+    for p in "${TASK_PIDS[@]}"; do
         [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
     done
 
@@ -639,11 +680,50 @@ WORKER_SCRIPT_EOF
         echo "$WORKER_PID" > "$WORKER_PID_FILE"
 
         echo -e "  ${GREEN}✓ Background worker started (PID: ${WORKER_PID}). Attaching to live progress monitor...${NC}"
-        echo -e "    ${CYAN}Tip: Press Ctrl+C at any time to detach without interrupting the background sync.${NC}\n"
+        echo -e "    ${CYAN}Tip: Press Ctrl+C at any time to detach or stop the sync.${NC}\n"
     fi
 
-    # Set non-killing trap for interactive monitor: detaching does not kill worker
-    trap 'echo -e "\n\n${YELLOW}[i] Detached from monitor. Snapshot worker (PID: ${WORKER_PID}) continues running in the background.${NC}"; echo -e "${CYAN}To re-attach anytime, simply run Step (1) again.${NC}\n"; exit 0' INT TERM
+    # Interactive trap: prompt user on Ctrl+C to terminate or keep running in background
+    handle_sigint() {
+        # Temporarily ignore signals during prompt
+        trap '' INT TERM
+        echo -e "\n"
+        echo -e "${YELLOW}================================================================${NC}"
+        echo -e "${YELLOW}[INTERRUPT] Received Ctrl+C signal.${NC}"
+        echo -e "Snapshot sync worker is currently running in the background (PID: ${WORKER_PID})."
+        echo -e "${YELLOW}================================================================${NC}"
+
+        local user_choice=""
+        if [ -e /dev/tty ] && [ -r /dev/tty ]; then
+            printf "%b" "${BOLD}Do you want to completely stop and terminate the entire sync process? [y/N]: ${NC}" > /dev/tty
+            read -r user_choice < /dev/tty || true
+        else
+            printf "%b" "${BOLD}Do you want to completely stop and terminate the entire sync process? [y/N]: ${NC}"
+            read -r user_choice || true
+        fi
+
+        case "$user_choice" in
+            [yY]|[yY][eE][sS])
+                echo -e "\n${RED}${BOLD}Stopping snapshot sync worker (PID: ${WORKER_PID})...${NC}"
+                if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+                    kill -TERM "$WORKER_PID" 2>/dev/null || true
+                    sleep 1
+                    kill -9 "$WORKER_PID" 2>/dev/null || true
+                fi
+                rm -f "$WORKER_PID_FILE" 2>/dev/null || true
+                echo -e "${RED}✓ Snapshot sync process terminated.${NC}\n"
+                exit 130
+                ;;
+            *)
+                echo -e "\n${GREEN}✓ Process will CONTINUE RUNNING in the background (PID: ${WORKER_PID}).${NC}"
+                echo -e "${CYAN}You can re-attach to the live progress anytime by running Step (1) again.${NC}"
+                echo -e "${CYAN}Or view live worker logs with: tail -f ${WORKER_LOG_FILE}${NC}\n"
+                exit 0
+                ;;
+        esac
+    }
+
+    trap handle_sigint INT TERM
 
     LAST_STATUS=""
     while kill -0 "$WORKER_PID" 2>/dev/null; do
