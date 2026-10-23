@@ -82,8 +82,6 @@ const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
     displayName: 'balajis',
     pfpUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/16e9ecaa-0837-4243-4316-ceeb9db19600/original',
     bio: 'Founder of Network School, author of The Network State, former CTO of Coinbase.',
-    followerCount: 61092,
-    followingCount: 58,
   },
   {
     fid: 432209,
@@ -91,8 +89,6 @@ const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
     displayName: 'Mohammad 🎩',
     pfpUrl: '/images/mohammad98.jpg',
     bio: 'CEO of @based-karma\n💻 Developer ▶️ Web3 , Python , AI , PHP & More ...',
-    followerCount: 6833,
-    followingCount: 484,
   },
 ];
 
@@ -209,7 +205,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
   // Suggested Follows (balajis first, mohammad98 second)
   const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>(DEFAULT_SUGGESTED_USERS);
-  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set([37, 432209]));
+  const [followedFids, setFollowedFids] = useState<Set<number>>(new Set());
 
   // Dynamic Client Sources Filter calculation
   const castSources = React.useMemo(() => {
@@ -364,15 +360,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       if (saved) {
         const parsed: UserSession = JSON.parse(saved);
-        if (
-          parsed.fid === 432209 ||
-          parsed.username?.toLowerCase() === 'mohammad98' ||
-          parsed.pfpUrl?.includes('soNnpxz')
-        ) {
-          parsed.pfpUrl = '/images/mohammad98.jpg';
-          if (!parsed.followerCount) parsed.followerCount = 6833;
-          if (!parsed.followingCount) parsed.followingCount = 484;
-        }
         setSession(parsed);
         setFeedMode('following');
         initialViewerFid = parsed.fid;
@@ -432,15 +419,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
   // Save session when updated
   const handleLoginSuccess = (userSession: UserSession) => {
-    if (
-      userSession.fid === 432209 ||
-      userSession.username?.toLowerCase() === 'mohammad98' ||
-      userSession.pfpUrl?.includes('soNnpxz')
-    ) {
-      userSession.pfpUrl = '/images/mohammad98.jpg';
-      if (!userSession.followerCount) userSession.followerCount = 6833;
-      if (!userSession.followingCount) userSession.followingCount = 484;
-    }
     setSession(userSession);
     setFeedMode('following');
     setIsAuthModalOpen(false);
@@ -498,14 +476,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             (u: FarcasterUser) => u.fid === 432209 || u.username?.toLowerCase() === 'mohammad98'
           ) || DEFAULT_SUGGESTED_USERS[1];
 
-        if (mohammadUser) {
+        if (mohammadUser && !mohammadUser.pfpUrl) {
           mohammadUser.pfpUrl = '/images/mohammad98.jpg';
-          if (!mohammadUser.followerCount) mohammadUser.followerCount = 6833;
-          if (!mohammadUser.followingCount) mohammadUser.followingCount = 484;
-        }
-        if (balajiUser) {
-          if (!balajiUser.followerCount) balajiUser.followerCount = 61092;
-          if (!balajiUser.followingCount) balajiUser.followingCount = 58;
         }
         setSuggestedUsers([balajiUser, mohammadUser]);
       } else {
@@ -586,21 +558,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       const res = await fetch(`/api/users/${fidOrUsername}?nodeUrl=${encodeURIComponent(nodeUrl)}`);
       const data = await res.json();
       if (data.user) {
-        // Normalize avatar for mohammad98
-        if (
-          data.user.fid === 432209 ||
-          data.user.username?.toLowerCase() === 'mohammad98' ||
-          data.user.pfpUrl?.includes('soNnpxz')
-        ) {
-          data.user.pfpUrl = '/images/mohammad98.jpg';
-          if (!data.user.followerCount) data.user.followerCount = 6833;
-          if (!data.user.followingCount) data.user.followingCount = 484;
-        }
-        if (data.user.fid === 37 || data.user.username?.toLowerCase() === 'balajis') {
-          if (!data.user.followerCount) data.user.followerCount = 61092;
-          if (!data.user.followingCount) data.user.followingCount = 58;
-        }
-
         setCurrentProfile(data.user);
         setProfileFid(data.user.fid);
         setIsFollowingCurrentProfile(!!data.isFollowing);
@@ -2155,19 +2112,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                         <div className="flex items-center gap-6 pt-2 border-t border-slate-100 text-sm">
                           <div className="flex items-center gap-1.5">
                             <span className="font-extrabold text-slate-900">
-                              {(
-                                currentProfile.followingCount ??
-                                (currentProfile.fid === 432209 ? 484 : currentProfile.fid === 37 ? 58 : 0)
-                              ).toLocaleString()}
+                              {(currentProfile.followingCount ?? 0).toLocaleString()}
                             </span>
                             <span className="text-slate-500 font-medium text-xs">Following</span>
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className="font-extrabold text-slate-900">
-                              {(
-                                currentProfile.followerCount ??
-                                (currentProfile.fid === 432209 ? 6833 : currentProfile.fid === 37 ? 61092 : 0)
-                              ).toLocaleString()}
+                              {(currentProfile.followerCount ?? 0).toLocaleString()}
                             </span>
                             <span className="text-slate-500 font-medium text-xs">Followers</span>
                           </div>

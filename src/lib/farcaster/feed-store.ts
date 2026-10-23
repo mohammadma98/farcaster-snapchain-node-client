@@ -12,48 +12,14 @@ class FeedStore {
   private users: Map<number, FarcasterUser> = new Map();
   private userFollows: Map<number, Set<number>> = new Map();
   private userReactions: Map<number, { likes: Set<string>; recasts: Set<string> }> = new Map();
-  private defaultFollowedFids: Set<number> = new Set([37, 432209]);
+  private defaultFollowedFids: Set<number> = new Set();
 
-  constructor() {
-    this.registerUser({
-      fid: 37,
-      username: 'balajis',
-      displayName: 'balajis',
-      pfpUrl: 'https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/16e9ecaa-0837-4243-4316-ceeb9db19600/original',
-      bio: 'Founder of Network School, author of The Network State, former CTO of Coinbase.',
-      followerCount: 61092,
-      followingCount: 58,
-    });
-    this.registerUser({
-      fid: 432209,
-      username: 'mohammad98',
-      displayName: 'Mohammad 🎩',
-      pfpUrl: '/images/mohammad98.jpg',
-      bio: 'CEO of @based-karma\n💻 Developer ▶️ Web3 , Python , AI , PHP & More ...',
-      followerCount: 6833,
-      followingCount: 484,
-    });
-  }
+  constructor() {}
 
   /**
    * Register or update a user profile in memory cache
    */
   public registerUser(user: FarcasterUser): FarcasterUser {
-    // Normalize Mohammad's avatar to ensure local 100% reliable image
-    if (
-      user.fid === 432209 ||
-      user.username?.toLowerCase() === 'mohammad98' ||
-      user.pfpUrl?.includes('soNnpxz')
-    ) {
-      user.pfpUrl = '/images/mohammad98.jpg';
-      if (!user.followerCount) user.followerCount = 6833;
-      if (!user.followingCount) user.followingCount = 484;
-    }
-    if (user.fid === 37 || user.username?.toLowerCase() === 'balajis') {
-      if (!user.followerCount) user.followerCount = 61092;
-      if (!user.followingCount) user.followingCount = 58;
-    }
-
     const existing = this.users.get(user.fid) || { fid: user.fid };
     const updated = { ...existing, ...user };
     this.users.set(user.fid, updated);
@@ -141,14 +107,9 @@ class FeedStore {
     const q = query.trim().toLowerCase().replace(/^@/, '');
     const resultMap = new Map<number, FarcasterUser>();
 
-    // 1. If empty, return featured users: balajis (first) and mohammad98 (second)
+    // 1. If empty, return currently cached users
     if (!q) {
-      const featured: FarcasterUser[] = [];
-      const u1 = this.users.get(37);
-      if (u1) featured.push(u1);
-      const u2 = this.users.get(432209);
-      if (u2) featured.push(u2);
-      return featured;
+      return Array.from(this.users.values()).slice(0, 10);
     }
 
     // 2. Direct username lookup on local Snapchain node
@@ -689,27 +650,21 @@ class FeedStore {
       }
     }
 
-    if (isRemove) {
-      this.defaultFollowedFids.delete(targetFid);
-      return false;
-    } else {
-      this.defaultFollowedFids.add(targetFid);
-      return true;
-    }
+    return !isRemove;
   }
 
   public isFollowing(targetFid: number, viewerFid?: number): boolean {
     if (viewerFid && this.userFollows.has(viewerFid)) {
       return this.userFollows.get(viewerFid)!.has(targetFid);
     }
-    return this.defaultFollowedFids.has(targetFid);
+    return false;
   }
 
   public getFollowedFids(viewerFid?: number): number[] {
     if (viewerFid && this.userFollows.has(viewerFid)) {
       return Array.from(this.userFollows.get(viewerFid)!);
     }
-    return Array.from(this.defaultFollowedFids);
+    return [];
   }
 
   public setFollowedFids(viewerFid: number, fids: number[]): void {

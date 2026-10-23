@@ -219,23 +219,23 @@ export class SnapchainNodeClient {
       // Local node lookup failed
     }
 
-    // Public directory fallback
+    // Fallback: Official decentralized FName registry
     try {
-      const wcRes = await fetch(
-        `https://client.warpcast.com/v2/user-by-username?username=${encodeURIComponent(cleanName)}`,
+      const fnameRes = await fetch(
+        `https://fnames.farcaster.xyz/transfers/current?name=${encodeURIComponent(cleanName)}`,
         {
           headers: { Accept: 'application/json' },
           signal: AbortSignal.timeout(4000),
         }
       );
-      if (wcRes.ok) {
-        const wcData = await wcRes.json();
-        const u = wcData?.result?.user;
-        if (u && typeof u.fid === 'number') {
+      if (fnameRes.ok) {
+        const fnameData = await fnameRes.json();
+        const transfer = fnameData?.transfer;
+        if (transfer && typeof transfer.to === 'number') {
           return {
-            fid: u.fid,
-            owner: u.connectedAccounts?.[0] || '0x',
-            name: u.username || cleanName,
+            fid: transfer.to,
+            owner: transfer.owner || '',
+            name: transfer.username || cleanName,
           };
         }
       }
@@ -344,29 +344,7 @@ export class SnapchainNodeClient {
       }
     }
 
-    // 3. Fallback to public network directory if profile metadata is incomplete
-    try {
-      const wcRes = await fetch(`https://client.warpcast.com/v2/user-by-fid?fid=${fid}`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(4000),
-      });
-      if (wcRes.ok) {
-        const wcData = await wcRes.json();
-        const u = wcData?.result?.user;
-        if (u) {
-          if (!profile.username && u.username) profile.username = u.username;
-          if (!profile.displayName && u.displayName) profile.displayName = u.displayName;
-          if (!profile.pfpUrl && u.pfp?.url) profile.pfpUrl = u.pfp.url;
-          if (!profile.bio && u.profile?.bio?.text) profile.bio = u.profile.bio.text;
-          if (typeof u.followerCount === 'number') profile.followerCount = u.followerCount;
-          if (typeof u.followingCount === 'number') profile.followingCount = u.followingCount;
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // 4. Ensure username is populated via FName registry if still missing
+    // 3. Ensure username is populated via decentralized FName registry if still missing
     if (!profile.username) {
       try {
         const fnameRes = await fetch(`https://fnames.farcaster.xyz/transfers/current?fid=${fid}`, {
@@ -386,18 +364,12 @@ export class SnapchainNodeClient {
       }
     }
 
-    // 5. Normalization for 100% reliable local assets & known key profiles
-    if (
-      fid === 432209 ||
-      profile.username?.toLowerCase() === 'mohammad98' ||
-      profile.pfpUrl?.includes('soNnpxz')
-    ) {
-      profile.pfpUrl = '/images/mohammad98.jpg';
-      if (!profile.followerCount) profile.followerCount = 6833;
-      if (!profile.followingCount) profile.followingCount = 484;
-    } else if (fid === 37 || profile.username?.toLowerCase() === 'balajis') {
-      if (!profile.followerCount) profile.followerCount = 61092;
-      if (!profile.followingCount) profile.followingCount = 58;
+    // 4. Dynamically compute authentic following count directly from local node
+    try {
+      const { fids: localFollows } = await this.getFollowsByFid(fid, cleanUrl);
+      profile.followingCount = localFollows.length;
+    } catch {
+      profile.followingCount = profile.followingCount || 0;
     }
 
     return profile;
@@ -457,106 +429,19 @@ export class SnapchainNodeClient {
           casts.push(cast);
         }
 
-        if (casts.length > 0) {
-          return casts;
-        }
+        return casts;
       }
     } catch {
-      // Local node unavailable or query timed out, fallback to remote
+      // Local node unavailable or query timed out
     }
 
-    // Remote network directory fallback for complete coverage
-    try {
-      return await this.getRemoteCastsByFid(fid, pageSize);
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Fetch casts for an FID from the decentralized protocol network directory
-   */
-  async getRemoteCastsByFid(fid: number, limit = 20): Promise<FarcasterCast[]> {
-    try {
-      const response = await fetch(`https://api.warpcast.com/v2/casts?fid=${fid}&limit=${limit}`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!response.ok) return [];
-
-      const data = await response.json();
-      const rawCasts = data?.result?.casts || [];
-      const casts: FarcasterCast[] = [];
-
-      for (const c of rawCasts) {
-        if (!c || !c.hash) continue;
-        const authorFid = c.author?.fid || fid;
-        const authorUser: FarcasterUser = {
-          fid: authorFid,
-          username: c.author?.username,
-          displayName: c.author?.displayName,
-          pfpUrl: c.author?.pfp?.url,
-          bio: c.author?.profile?.bio?.text,
-        };
-
-        const parsedEmbeds: Array<{ url?: string; castId?: { fid: number; hash: string } }> = [];
-        if (Array.isArray(c.embeds?.images)) {
-          for (const img of c.embeds.images) {
-            if (img.url) parsedEmbeds.push({ url: img.url });
-          }
-        }
-        if (Array.isArray(c.embeds?.urls)) {
-          for (const u of c.embeds.urls) {
-            const urlVal = u.openGraph?.url || u.url;
-            if (urlVal) parsedEmbeds.push({ url: urlVal });
-          }
-        }
-        if (Array.isArray(c.embeds?.casts)) {
-          for (const embeddedCast of c.embeds.casts) {
-            if (embeddedCast.hash) {
-              parsedEmbeds.push({
-                castId: {
-                  fid: embeddedCast.author?.fid || 0,
-                  hash: embeddedCast.hash,
-                },
-              });
-            }
-          }
-        }
-
-        const cast: FarcasterCast = {
-          hash: c.hash,
-          fid: authorFid,
-          text: c.text || '',
-          timestamp: typeof c.timestamp === 'number' ? c.timestamp : Date.now(),
-          author: authorUser,
-          embeds: parsedEmbeds,
-          parentCastId: c.parentHash
-            ? { fid: c.parentAuthor?.fid || 0, hash: c.parentHash }
-            : undefined,
-          reactions: {
-            likesCount: c.reactions?.count || 0,
-            recastsCount: c.recasts?.count || 0,
-          },
-          repliesCount: c.replies?.count || 0,
-        };
-
-        const attr = identifyCastClient(cast);
-        cast.clientSource = attr.clientName;
-        casts.push(cast);
-      }
-
-      return casts;
-    } catch {
-      return [];
-    }
+    return [];
   }
 
   /**
    * Fetch followed accounts for an FID (links of type 'follow')
-   * 1. Direct query to local Snapchain node /v1/linksByFid?fid=...&link_type=follow
-   * 2. Comprehensive protocol directory query (/v2/following) with multi-page support
-   * Merges and deduplicates both to ensure 100% accurate follow list.
+   * 100% sovereign: directly queries the local Snapchain node /v1/linksByFid with pageToken pagination.
+   * Zero external API dependencies.
    */
   async getFollowsByFid(
     fid: number,
@@ -566,68 +451,38 @@ export class SnapchainNodeClient {
     const followedFidSet = new Set<number>();
     const userMap = new Map<number, FarcasterUser>();
 
-    // 1. Fetch from protocol directory (/v2/following)
     try {
-      let currentCursor: string | undefined = undefined;
+      let pageToken: string | undefined = undefined;
       let pages = 0;
-      while (pages < 3) {
-        const cursorQuery: string = currentCursor ? `&cursor=${encodeURIComponent(currentCursor)}` : '';
-        const fetchUrl: string = `https://api.warpcast.com/v2/following?fid=${fid}&limit=100${cursorQuery}`;
-        const res: Response = await fetch(fetchUrl, {
+      const maxPages = 50; // Supports up to 5,000 followings (50 * 100)
+
+      while (pages < maxPages) {
+        const tokenQuery = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+        const fetchUrl = `${cleanUrl}/v1/linksByFid?fid=${fid}&link_type=follow&pageSize=100${tokenQuery}`;
+        const res = await fetch(fetchUrl, {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(8000),
         });
 
         if (!res.ok) break;
 
         const resData: any = await res.json();
-        const users: any[] = resData?.result?.users || [];
-        for (const u of users) {
-          if (typeof u.fid === 'number' && u.fid > 0) {
-            followedFidSet.add(u.fid);
-            if (!userMap.has(u.fid)) {
-              userMap.set(u.fid, {
-                fid: u.fid,
-                username: u.username,
-                displayName: u.displayName,
-                pfpUrl: u.pfp?.url,
-                bio: u.profile?.bio?.text,
-                followerCount: u.followerCount,
-                followingCount: u.followingCount,
-              });
-            }
-          }
-        }
+        const messages: any[] = resData.messages || [];
+        if (messages.length === 0) break;
 
-        currentCursor = resData?.next?.cursor;
-        pages++;
-        if (!currentCursor) break;
-      }
-    } catch {
-      // Protocol directory fallback error or rate-limit
-    }
-
-    // 2. Query local Snapchain / Hubble node HTTP API (/v1/linksByFid?fid=...&link_type=follow)
-    try {
-      const response = await fetch(
-        `${cleanUrl}/v1/linksByFid?fid=${fid}&link_type=follow&pageSize=100&reverse=true`,
-        {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        const messages = data.messages || [];
         for (const msg of messages) {
           const targetFid = msg.data?.linkBody?.targetFid || msg.data?.link_body?.target_fid;
           if (typeof targetFid === 'number' && targetFid > 0) {
             followedFidSet.add(targetFid);
           }
         }
+
+        pageToken = resData.nextPageToken;
+        pages++;
+        if (!pageToken) break;
       }
-    } catch {
-      // Local node unavailable or syncing
+    } catch (err) {
+      console.warn(`Local node linksByFid lookup for FID ${fid} failed:`, err);
     }
 
     const fids = Array.from(followedFidSet);
@@ -746,54 +601,6 @@ export class SnapchainNodeClient {
     }
 
     if (nodeCast) return nodeCast;
-
-    // Fallback to protocol network lookup via Warpcast thread-casts
-    try {
-      const fallbackRes = await fetch(
-        `https://client.warpcast.com/v2/thread-casts?castHash=${cleanHash}`,
-        {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(6000),
-        }
-      );
-      if (fallbackRes.ok) {
-        const data = await fallbackRes.json();
-        const casts = data?.result?.casts || [];
-        const match = casts.find((c: any) => c.hash?.toLowerCase() === cleanHash.toLowerCase()) || casts[0];
-        if (match) {
-          const cast: FarcasterCast = {
-            hash: match.hash || cleanHash,
-            fid: match.author?.fid || fid,
-            text: match.text || '',
-            timestamp: typeof match.timestamp === 'number' ? match.timestamp : Date.now(),
-            author: {
-              fid: match.author?.fid || fid,
-              username: match.author?.username,
-              displayName: match.author?.displayName,
-              pfpUrl: match.author?.pfp?.url,
-            },
-            embeds: [
-              ...(match.embeds?.images || []).map((img: any) => ({ url: img.url || img.sourceUrl })),
-              ...(match.embeds?.urls || []).map((u: any) => ({ url: u.url })),
-              ...(match.embeds?.casts || []).map((qc: any) => ({ castId: { fid: qc.author?.fid, hash: qc.hash } })),
-            ],
-            reactions: {
-              likesCount: match.reactions?.count || 0,
-              recastsCount: match.recasts?.count || 0,
-              likedByMe: match.viewerContext?.reacted || false,
-              recastByMe: match.viewerContext?.recast || false,
-            },
-            repliesCount: match.replies?.count || 0,
-          };
-          const attr = identifyCastClient(cast);
-          cast.clientSource = attr.clientName;
-          return cast;
-        }
-      }
-    } catch {
-      // Fallback network unavailable
-    }
-
     return null;
   }
 
