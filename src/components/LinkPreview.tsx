@@ -292,12 +292,12 @@ export interface FormattedCastTextProps {
 
 /**
  * Text renderer that highlights URLs and @mentions into clickable elements
- * Supports truncating casts longer than 2048 characters with an interactive 'Read more' toggle.
+ * Supports truncating casts longer than 768 characters with an interactive 'Read more' toggle.
  */
 export function FormattedCastText({
   text,
   onUserClick,
-  maxLength = 2048,
+  maxLength = 768,
   readMoreText = 'Read more',
   showLessText = 'Show less',
   readMoreClassName,
@@ -308,7 +308,7 @@ export function FormattedCastText({
 
   const isLong = text.length > maxLength;
 
-  // When not expanded and text is over the 2048-char limit, truncate smoothly
+  // When not expanded and text is over the 768-char limit, truncate smoothly
   let displayText = text;
   if (isLong && !isExpanded) {
     let cutoff = maxLength;

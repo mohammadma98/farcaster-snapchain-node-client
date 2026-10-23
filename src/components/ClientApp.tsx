@@ -740,7 +740,7 @@ export function ClientApp({ lang }: ClientAppProps) {
                       </span>
                     </div>
 
-                    {/* Cast Body with 2048 Char Read More Support */}
+                    {/* Cast Body with 768 Char Read More Support */}
                     <div className="text-sm text-purple-100/90 leading-relaxed">
                       <FormattedCastText
                         text={cast.text}

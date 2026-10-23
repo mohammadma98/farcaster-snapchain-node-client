@@ -139,10 +139,10 @@ async function runTests() {
   const dbStatus = await isPostgresAvailable();
   console.log('PostgreSQL availability check:', dbStatus ? 'Connected (512MB limit active)' : 'Offline (Clean Fallback Active)');
 
-  console.log('\n--- 8. Testing 2048 Character Limit & Truncation ---');
-  const shortText = 'This is a short cast under 2048 characters.';
-  const longText = 'A'.repeat(2500) + ' trailing word.';
-  const MAX_LIMIT = 2048;
+  console.log('\n--- 8. Testing 768 Character Limit & Truncation ---');
+  const shortText = 'This is a short cast under 768 characters.';
+  const longText = 'A'.repeat(1000) + ' trailing word.';
+  const MAX_LIMIT = 768;
 
   const isShortOver = shortText.length > MAX_LIMIT;
   const isLongOver = longText.length > MAX_LIMIT;
@@ -162,7 +162,7 @@ async function runTests() {
   }
   const truncatedText = longText.slice(0, cutoff).trimEnd();
   if (truncatedText.length > MAX_LIMIT) {
-    throw new Error('Truncated text exceeds 2048 characters limit');
+    throw new Error('Truncated text exceeds 768 characters limit');
   }
   console.log(`Verified cast truncation logic: Original length = ${longText.length}, Truncated length = ${truncatedText.length} <= ${MAX_LIMIT}`);
 
