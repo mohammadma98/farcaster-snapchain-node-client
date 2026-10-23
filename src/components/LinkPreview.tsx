@@ -281,21 +281,52 @@ export function CastMediaPreviews({
   );
 }
 
+export interface FormattedCastTextProps {
+  text: string;
+  onUserClick?: (username: string) => void;
+  maxLength?: number;
+  readMoreText?: string;
+  showLessText?: string;
+  readMoreClassName?: string;
+}
+
 /**
  * Text renderer that highlights URLs and @mentions into clickable elements
+ * Supports truncating casts longer than 2048 characters with an interactive 'Read more' toggle.
  */
 export function FormattedCastText({
   text,
   onUserClick,
-}: {
-  text: string;
-  onUserClick?: (username: string) => void;
-}) {
+  maxLength = 2048,
+  readMoreText = 'Read more',
+  showLessText = 'Show less',
+  readMoreClassName,
+}: FormattedCastTextProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (!text) return null;
+
+  const isLong = text.length > maxLength;
+
+  // When not expanded and text is over the 2048-char limit, truncate smoothly
+  let displayText = text;
+  if (isLong && !isExpanded) {
+    let cutoff = maxLength;
+    const lastSpace = text.lastIndexOf(' ', maxLength);
+    // Snap to word boundary if space exists within the last 40 chars
+    if (lastSpace > maxLength - 40) {
+      cutoff = lastSpace;
+    }
+    displayText = text.slice(0, cutoff).trimEnd();
+  }
 
   // Split text by URLs and mentions
   const tokenRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s]|@[a-zA-Z0-9_\.-]+)/gi;
-  const parts = text.split(tokenRegex);
+  const parts = displayText.split(tokenRegex);
+
+  const defaultBtnClass =
+    'inline-flex items-center text-xs font-semibold text-purple-600 hover:text-purple-800 hover:underline select-none cursor-pointer focus:outline-hidden transition-colors';
+  const btnStyle = readMoreClassName || defaultBtnClass;
 
   return (
     <span className="select-text whitespace-pre-wrap leading-relaxed">
@@ -307,7 +338,9 @@ export function FormattedCastText({
           let display = part;
           try {
             const parsed = new URL(part);
-            display = parsed.hostname + (parsed.pathname.length > 15 ? parsed.pathname.slice(0, 15) + '...' : parsed.pathname);
+            display =
+              parsed.hostname +
+              (parsed.pathname.length > 15 ? parsed.pathname.slice(0, 15) + '...' : parsed.pathname);
           } catch {
             display = part.length > 30 ? part.slice(0, 30) + '...' : part;
           }
@@ -338,7 +371,7 @@ export function FormattedCastText({
                 e.stopPropagation();
                 if (onUserClick) onUserClick(username);
               }}
-              className="text-purple-700 hover:text-purple-900 font-bold hover:underline inline p-0 m-0 bg-transparent border-0"
+              className="text-purple-700 hover:text-purple-900 font-bold hover:underline inline p-0 m-0 bg-transparent border-0 cursor-pointer"
             >
               {part}
             </button>
@@ -347,6 +380,38 @@ export function FormattedCastText({
 
         return <React.Fragment key={i}>{part}</React.Fragment>;
       })}
+
+      {/* Truncation & Interactive Read more / Show less buttons */}
+      {isLong && !isExpanded && (
+        <>
+          <span className="text-slate-400 select-none">... </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsExpanded(true);
+            }}
+            className={btnStyle}
+          >
+            {readMoreText}
+          </button>
+        </>
+      )}
+
+      {isLong && isExpanded && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsExpanded(false);
+          }}
+          className={`${btnStyle} ml-2`}
+        >
+          {showLessText}
+        </button>
+      )}
     </span>
   );
 }

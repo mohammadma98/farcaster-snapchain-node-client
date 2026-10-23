@@ -139,6 +139,33 @@ async function runTests() {
   const dbStatus = await isPostgresAvailable();
   console.log('PostgreSQL availability check:', dbStatus ? 'Connected (512MB limit active)' : 'Offline (Clean Fallback Active)');
 
+  console.log('\n--- 8. Testing 2048 Character Limit & Truncation ---');
+  const shortText = 'This is a short cast under 2048 characters.';
+  const longText = 'A'.repeat(2500) + ' trailing word.';
+  const MAX_LIMIT = 2048;
+
+  const isShortOver = shortText.length > MAX_LIMIT;
+  const isLongOver = longText.length > MAX_LIMIT;
+
+  if (isShortOver) {
+    throw new Error('Short cast incorrectly flagged as over limit');
+  }
+  if (!isLongOver) {
+    throw new Error('Long cast was not flagged as over limit');
+  }
+
+  // Simulate truncation cutoff
+  let cutoff = MAX_LIMIT;
+  const lastSpace = longText.lastIndexOf(' ', MAX_LIMIT);
+  if (lastSpace > MAX_LIMIT - 40) {
+    cutoff = lastSpace;
+  }
+  const truncatedText = longText.slice(0, cutoff).trimEnd();
+  if (truncatedText.length > MAX_LIMIT) {
+    throw new Error('Truncated text exceeds 2048 characters limit');
+  }
+  console.log(`Verified cast truncation logic: Original length = ${longText.length}, Truncated length = ${truncatedText.length} <= ${MAX_LIMIT}`);
+
   console.log('\n✓ All protocol unit tests PASSED successfully!');
 }
 

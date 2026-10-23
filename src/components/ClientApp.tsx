@@ -35,6 +35,7 @@ import { identifyCastClient, applyClientFilter } from '../lib/farcaster/client-f
 import { GaslessSignerManager } from '../lib/farcaster/gasless-signer';
 import { defaultNodeClient } from '../lib/farcaster/node-client';
 import { generateCustodyAccount } from '../lib/farcaster/crypto';
+import { FormattedCastText } from './LinkPreview';
 
 interface ClientAppProps {
   lang: Language;
@@ -739,8 +740,13 @@ export function ClientApp({ lang }: ClientAppProps) {
                       </span>
                     </div>
 
-                    {/* Cast Body */}
-                    <p className="text-sm text-purple-100/90 leading-relaxed whitespace-pre-wrap">{cast.text}</p>
+                    {/* Cast Body with 2048 Char Read More Support */}
+                    <div className="text-sm text-purple-100/90 leading-relaxed">
+                      <FormattedCastText
+                        text={cast.text}
+                        readMoreClassName="inline-flex items-center text-xs font-semibold text-purple-400 hover:text-purple-300 hover:underline select-none cursor-pointer focus:outline-hidden"
+                      />
+                    </div>
 
                     {/* Quoted Cast Card (Nested à la farcaster.xyz) */}
                     {quoted && (
