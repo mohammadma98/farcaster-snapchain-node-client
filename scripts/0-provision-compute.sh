@@ -557,16 +557,37 @@ if [ -f /etc/fstab ] && [ -n "$SELECTED_MOUNT" ]; then
     fi
 fi
 
-# Parallel Decompression Utility (pigz)
-if ! command -v pigz &> /dev/null && command -v apt-get &> /dev/null; then
-    echo -e "  • Installing parallel decompression engine (pigz) for multi-core snapshot acceleration..."
-    $SUDO apt-get update -qq && $SUDO apt-get install -y -qq pigz &>/dev/null || true
-fi
+# ------------------------------------------------------------------------------
+# Verify & Install Foundational Packages & Python Runtime
+# ------------------------------------------------------------------------------
+echo -e "  • Verifying Python Runtime & Foundational Packages (python3, jq, pigz, curl, git)..."
+MISSING_PKGS=()
+for p in python3 jq pigz curl tar git; do
+    if ! command -v "$p" &> /dev/null; then
+        MISSING_PKGS+=("$p")
+    fi
+done
 
-# Docker Engine & Compose
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo -e "    - Installing missing foundational packages: ${YELLOW}${MISSING_PKGS[*]}${NC}..."
+    if command -v apt-get &> /dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        $SUDO apt-get update -qq > /dev/null 2>&1 || true
+        $SUDO apt-get install -y -qq "${MISSING_PKGS[@]}" > /dev/null 2>&1 || $SUDO apt-get install -y "${MISSING_PKGS[@]}"
+    elif command -v dnf &> /dev/null; then
+        $SUDO dnf install -y -q "${MISSING_PKGS[@]}" > /dev/null 2>&1 || true
+    elif command -v yum &> /dev/null; then
+        $SUDO yum install -y -q "${MISSING_PKGS[@]}" > /dev/null 2>&1 || true
+    fi
+fi
+echo -e "    ${GREEN}✓ Foundational packages & Python runtime verified:${NC} $(python3 --version 2>/dev/null || echo 'python3')"
+
+# ------------------------------------------------------------------------------
+# Intelligent Docker Engine & Container Runtime Verification
+# ------------------------------------------------------------------------------
 echo -e "  • Verifying Docker Engine & Container Runtime..."
 if ! command -v docker &> /dev/null; then
-    echo "    - Installing official Docker Engine..."
+    echo "    - Installing official Docker Engine via get.docker.com..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
     $SUDO sh /tmp/get-docker.sh
     rm -f /tmp/get-docker.sh
@@ -579,8 +600,24 @@ else
     echo -e "    ${GREEN}✓ Docker is active: $(docker --version)${NC}"
 fi
 
+# Ensure Docker service is enabled and running
 if command -v systemctl &> /dev/null; then
     $SUDO systemctl enable --now docker > /dev/null 2>&1 || true
+elif command -v service &> /dev/null; then
+    $SUDO service docker start > /dev/null 2>&1 || true
+fi
+
+# Ensure Docker Compose (V2 plugin or standalone) is installed and operational
+if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/null; then
+    if [ -n "$SUDO" ] && $SUDO docker compose version &>/dev/null; then
+        :
+    else
+        echo "    - Installing Docker Compose plugin..."
+        if command -v apt-get &>/dev/null; then
+            export DEBIAN_FRONTEND=noninteractive
+            $SUDO apt-get install -y -qq docker-compose-plugin > /dev/null 2>&1 || true
+        fi
+    fi
 fi
 
 # Firewall Configuration (UFW)

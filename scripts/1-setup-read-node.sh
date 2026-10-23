@@ -86,6 +86,70 @@ format_speed() {
 }
 
 # ------------------------------------------------------------------------------
+# Intelligent Docker Runtime Resolver (Sudo Detection & Compose V1/V2 Support)
+# ------------------------------------------------------------------------------
+DOCKER_BIN="docker"
+COMPOSE_CMD="docker compose"
+
+resolve_docker_runtime() {
+    # 1. Determine if docker commands require sudo or daemon activation
+    if docker info > /dev/null 2>&1; then
+        DOCKER_BIN="docker"
+    elif command -v sudo &> /dev/null && sudo docker info > /dev/null 2>&1; then
+        DOCKER_BIN="sudo docker"
+    else
+        # Attempt to activate Docker daemon service if dormant
+        if command -v systemctl &> /dev/null; then
+            if command -v sudo &> /dev/null; then
+                sudo systemctl enable --now docker > /dev/null 2>&1 || true
+            else
+                systemctl enable --now docker > /dev/null 2>&1 || true
+            fi
+        elif command -v service &> /dev/null; then
+            if command -v sudo &> /dev/null; then
+                sudo service docker start > /dev/null 2>&1 || true
+            else
+                service docker start > /dev/null 2>&1 || true
+            fi
+        fi
+        sleep 2
+        if docker info > /dev/null 2>&1; then
+            DOCKER_BIN="docker"
+        elif command -v sudo &> /dev/null && sudo docker info > /dev/null 2>&1; then
+            DOCKER_BIN="sudo docker"
+        else
+            echo -e "${RED}[ERROR] Docker daemon is not active or accessible. Please verify Docker installation.${NC}"
+            exit 1
+        fi
+    fi
+
+    # 2. Determine Compose syntax: 'docker compose' (V2 plugin) vs 'docker-compose' (V1 standalone)
+    if $DOCKER_BIN compose version > /dev/null 2>&1; then
+        COMPOSE_CMD="$DOCKER_BIN compose"
+    elif command -v docker-compose &> /dev/null && docker-compose version > /dev/null 2>&1; then
+        COMPOSE_CMD="docker-compose"
+    elif command -v sudo &> /dev/null && sudo docker-compose version > /dev/null 2>&1; then
+        COMPOSE_CMD="sudo docker-compose"
+    else
+        # Auto-fallback: attempt to install docker-compose-plugin
+        if command -v apt-get &> /dev/null; then
+            if command -v sudo &> /dev/null; then
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1 || true
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-compose-plugin > /dev/null 2>&1 || true
+            else
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1 || true
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-compose-plugin > /dev/null 2>&1 || true
+            fi
+        fi
+        if $DOCKER_BIN compose version > /dev/null 2>&1; then
+            COMPOSE_CMD="$DOCKER_BIN compose"
+        else
+            COMPOSE_CMD="$DOCKER_BIN compose"
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # 1. Verify Step (0) Provisioning State & Load Matrix Profiles
 # ------------------------------------------------------------------------------
 CONFIG_FILE="/etc/snapchain/snapchain.conf"
@@ -93,25 +157,43 @@ if [ ! -f "$CONFIG_FILE" ] && [ -f "${HOME}/.snapchain.conf" ]; then
     CONFIG_FILE="${HOME}/.snapchain.conf"
 fi
 
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo -e "\n${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}${BOLD}[FATAL ERROR] Step (0) Provisioning Not Detected!${NC}"
-    echo -e "${RED}${BOLD}================================================================${NC}"
-    echo -e "${RED}This server has not completed compute provisioning and storage selection.${NC}"
-    echo -e "You MUST run Command (0) before setting up the Snapchain Read Node.\n"
-    echo -e "Please execute Command (0) now:"
-    echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash${NC}\n"
-    exit 1
+PROVISIONED=false
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE" 2>/dev/null || true
 fi
 
-# Load provisioned configuration
-# shellcheck source=/dev/null
-source "$CONFIG_FILE"
-
 if [ "${PROVISIONED:-false}" != "true" ]; then
-    echo -e "\n${RED}${BOLD}[ERROR] Compute provisioning in Step (0) was incomplete or failed.${NC}"
-    echo -e "Please re-run Command (0) to properly prepare hardware and storage."
-    exit 1
+    echo -e "\n${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "${YELLOW}${BOLD}  ⚠ Notice: Step (0) [Compute Provisioning] Required First      ${NC}"
+    echo -e "${YELLOW}${BOLD}================================================================${NC}"
+    echo -e "${YELLOW}Step (0) has not been executed yet on this server.${NC}"
+    echo -e "You must run Command (0) first to prepare hardware profiles, allocate storage,"
+    echo -e "tune Linux kernel socket buffers, and install container runtimes.\n"
+
+    RUN_STEP0=$(prompt_user "Would you like to automatically run Step (0) [Provision Compute] now? [Y/n]: " "y")
+    case "$RUN_STEP0" in
+        [yY]|[yY][eE][sS])
+            echo -e "\n${CYAN}${BOLD}Launching Step (0): Provisioning Compute & Storage Matrix...${NC}\n"
+            if [ -f "./scripts/0-provision-compute.sh" ]; then
+                exec bash "./scripts/0-provision-compute.sh"
+            elif [ -f "./0-provision-compute.sh" ]; then
+                exec bash "./0-provision-compute.sh"
+            elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh" ]; then
+                exec bash "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh"
+            else
+                TMP_STEP0=$(mktemp /tmp/snapchain_step0.XXXXXX.sh)
+                curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh?v=$(date +%s)" -o "$TMP_STEP0"
+                chmod +x "$TMP_STEP0"
+                exec bash "$TMP_STEP0"
+            fi
+            ;;
+        *)
+            echo -e "\n${RED}[ABORTED] Please run Command (0) first to prepare this server:${NC}"
+            echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash${NC}\n"
+            exit 1
+            ;;
+    esac
 fi
 
 PROFILE_CPU="${PROFILE_CPU:-C2}"
@@ -1312,13 +1394,15 @@ fi
 # ------------------------------------------------------------------------------
 # 6. Launch Standalone Snapchain Read Node
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[4/4] Starting Snapchain Docker container...${NC}"
-docker compose down || true
-docker compose up -d
+resolve_docker_runtime
 
-CONTAINER_NAME=$(docker ps --filter "name=snapchain" --filter "status=running" --format "{{.Names}}" 2>/dev/null | grep -E "snapchain.*snapchain|snapchain" | head -n 1 || echo "")
+echo -e "\n${YELLOW}[4/4] Starting Snapchain Docker container with ${COMPOSE_CMD}...${NC}"
+$COMPOSE_CMD down || true
+$COMPOSE_CMD up -d
+
+CONTAINER_NAME=$($DOCKER_BIN ps --filter "name=snapchain" --filter "status=running" --format "{{.Names}}" 2>/dev/null | grep -E "snapchain.*snapchain|snapchain" | head -n 1 || echo "")
 if [ -z "$CONTAINER_NAME" ]; then
-    CONTAINER_NAME=$(docker ps --filter "name=snapchain" --format "{{.Names}}" 2>/dev/null | head -n 1 || echo "snapchain")
+    CONTAINER_NAME=$($DOCKER_BIN ps --filter "name=snapchain" --format "{{.Names}}" 2>/dev/null | head -n 1 || echo "snapchain")
 fi
 
 # ------------------------------------------------------------------------------
@@ -1337,9 +1421,9 @@ while [ "$ELAPSED" -lt "$INIT_TIMEOUT" ]; do
         break
     fi
 
-    if ! docker ps --filter "name=${CONTAINER_NAME}" --filter "status=running" -q 2>/dev/null | grep -q .; then
+    if ! $DOCKER_BIN ps --filter "name=${CONTAINER_NAME}" --filter "status=running" -q 2>/dev/null | grep -q .; then
         echo -e "\n${RED}[ERROR] Container stopped unexpectedly. Latest logs:${NC}"
-        docker logs --tail 30 "${CONTAINER_NAME}" 2>&1 || true
+        $DOCKER_BIN logs --tail 30 "${CONTAINER_NAME}" 2>&1 || true
         exit 1
     fi
 
@@ -1364,10 +1448,10 @@ if [ "$SYNCED" == "true" ]; then
     if [ "$METRICS_ACTIVE" == "true" ]; then
         echo -e "  - Grafana Monitoring Dashboard:           ${BOLD}http://localhost:3005${NC} (admin/admin)"
     fi
-    echo -e "\nTo view live logs: ${BOLD}docker logs -f ${CONTAINER_NAME}${NC}"
+    echo -e "\nTo view live logs: ${BOLD}${DOCKER_BIN} logs -f ${CONTAINER_NAME}${NC}"
 else
     echo -e "${YELLOW}Notice: Node container is starting up and catching up blocks.${NC}"
-    echo -e "Inspect status anytime using: ${BOLD}docker logs -f ${CONTAINER_NAME}${NC}"
+    echo -e "Inspect status anytime using: ${BOLD}${DOCKER_BIN} logs -f ${CONTAINER_NAME}${NC}"
 fi
 
 echo -e "\n${GREEN}${BOLD}================================================================${NC}"
