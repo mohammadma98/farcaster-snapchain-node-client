@@ -3,6 +3,8 @@ import { initDatabaseSchema } from '../db/schema';
 import { CastRepository, UserRepository, CheckpointRepository } from '../db/repositories';
 import { FarcasterCast, FarcasterUser } from '../farcaster/types';
 import { identifyCastClient } from '../farcaster/client-filter';
+import { SignerAttributionService } from '../farcaster/attribution';
+import { extractSignerHex } from '../farcaster/node-client';
 
 const FARCASTER_EPOCH = 1609459200000;
 const ADVISORY_LOCK_ID = 424242;
@@ -278,6 +280,7 @@ export class FeedWorker {
       // Resolve author profile
       const fid = msg.data.fid;
       const author = await this.resolveAuthor(fid);
+      const signerHex = extractSignerHex(msg.signer);
 
       const cast: FarcasterCast = {
         hash: hashHex,
@@ -285,6 +288,7 @@ export class FeedWorker {
         text: castBody.text || '',
         timestamp,
         author,
+        signer: signerHex,
         parentCastId: castBody.parentCastId
           ? { fid: castBody.parentCastId.fid, hash: castBody.parentCastId.hash }
           : undefined,
@@ -296,8 +300,25 @@ export class FeedWorker {
         mentions: castBody.mentions,
       };
 
-      const attribution = identifyCastClient(cast);
-      cast.clientSource = attribution.clientName;
+      if (signerHex) {
+        try {
+          const details = await SignerAttributionService.resolveSigner(fid, signerHex, this.nodeUrl);
+          if (details) {
+            cast.clientFid = details.clientFid;
+            cast.clientType = details.clientType;
+            cast.clientName = details.clientName;
+            cast.clientUsername = details.clientUsername;
+            cast.clientSource = details.clientName;
+          }
+        } catch {
+          // Fallback to heuristic
+        }
+      }
+
+      if (!cast.clientSource) {
+        const attribution = identifyCastClient(cast);
+        cast.clientSource = attribution.clientName;
+      }
 
       await CastRepository.upsertCast(cast);
       return true;

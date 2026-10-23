@@ -46,6 +46,11 @@ export interface FarcasterCast {
     pfpUrl?: string;
   };
   clientSource?: string; // Identified client: Warpcast, Supercast, Phaver, Direct Snapchain, etc.
+  signer?: string; // Ed25519 public key hex of the signer
+  clientFid?: number; // requestFid from key registration
+  clientType?: 'known' | 'personal' | 'other'; // Client category
+  clientName?: string; // Display name of client: Warpcast, Supercast, Self-registered, @username, etc.
+  clientUsername?: string; // Client account username
   embeds?: Array<{ url?: string; castId?: { fid: number; hash: string } }>;
   mentions?: number[];
   parentCastId?: {
@@ -103,6 +108,26 @@ export interface ActiveSigner {
 }
 
 export type ClientFilterMode = 'all' | 'include' | 'exclude';
+
+export type ClientCategory = 'known' | 'personal' | 'other';
+
+export interface ClientAttributionDetails {
+  signer: string;
+  userFid: number;
+  clientFid: number;
+  clientType: ClientCategory;
+  clientName: string;
+  clientUsername?: string;
+  badgeColor?: string;
+}
+
+export interface KnownClientEntry {
+  fid: number;
+  name: string;
+  username: string;
+  brandColor: string;
+  iconUrl?: string;
+}
 
 export interface ClientFilterConfig {
   mode: ClientFilterMode;

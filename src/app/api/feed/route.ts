@@ -17,6 +17,16 @@ export async function GET(request: Request) {
     const cursorParam = searchParams.get('cursor');
     const cursorTimestamp = cursorParam ? parseInt(cursorParam, 10) : undefined;
     const sourceFilter = searchParams.get('source') || undefined;
+    const clientType = searchParams.get('client_type') || undefined;
+    const clientFidsParam = searchParams.get('client_fids');
+    const clientFids = clientFidsParam
+      ? clientFidsParam.split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n))
+      : undefined;
+    const excludeClientFidsParam = searchParams.get('exclude_client_fids');
+    const excludeClientFids = excludeClientFidsParam
+      ? excludeClientFidsParam.split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n))
+      : undefined;
+    const onlySelfRegistered = searchParams.get('only_self_registered') === 'true';
     const fidParam = searchParams.get('fid');
     const fid = fidParam ? parseInt(fidParam, 10) : undefined;
     const viewerFidParam = searchParams.get('viewerFid');
@@ -51,6 +61,10 @@ export async function GET(request: Request) {
         limit,
         cursorTimestamp,
         sourceFilter,
+        clientType,
+        clientFids,
+        excludeClientFids,
+        onlySelfRegistered,
       });
 
       if (dbCasts.length > 0) {
@@ -70,6 +84,12 @@ export async function GET(request: Request) {
           viewerFid,
           nodeUrl,
           storage: 'postgres',
+          clientFilters: {
+            clientType,
+            clientFids,
+            excludeClientFids,
+            onlySelfRegistered,
+          },
         });
       }
     }

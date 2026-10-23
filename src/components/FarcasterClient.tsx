@@ -66,8 +66,10 @@ const PRESET_NODES: SnapchainNodePreset[] = [
 
 const KNOWN_SOURCES = [
   { id: 'all', label: 'All Clients / Sources' },
+  { id: 'Self-registered', label: 'Self-registered (Personal)' },
   { id: 'Direct Snapchain', label: 'Direct Snapchain' },
   { id: 'Warpcast', label: 'Warpcast' },
+  { id: 'Firefly', label: 'Firefly' },
   { id: 'Supercast', label: 'Supercast' },
   { id: 'Phaver', label: 'Phaver' },
   { id: 'Paragraph', label: 'Paragraph' },
@@ -93,16 +95,24 @@ const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
   },
 ];
 
-function getClientBadgeColor(source?: string) {
+function getClientBadgeColor(source?: string, clientType?: string) {
+  if (clientType === 'personal' || source === 'Self-registered') {
+    return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+  }
+  if (clientType === 'other' || source?.startsWith('FID ') || source?.startsWith('Client FID')) {
+    return 'text-slate-700 bg-slate-50 border-slate-200';
+  }
   switch (source) {
     case 'Direct Snapchain':
       return 'text-cyan-700 bg-cyan-50 border-cyan-200';
+    case 'Firefly':
+      return 'text-blue-700 bg-blue-50 border-blue-200';
     case 'Supercast':
       return 'text-indigo-700 bg-indigo-50 border-indigo-200';
     case 'Phaver':
       return 'text-pink-700 bg-pink-50 border-pink-200';
     case 'Paragraph':
-      return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+      return 'text-teal-700 bg-teal-50 border-teal-200';
     case 'Bountycaster':
       return 'text-amber-700 bg-amber-50 border-amber-200';
     case 'Herocast':
@@ -115,16 +125,24 @@ function getClientBadgeColor(source?: string) {
   }
 }
 
-function getClientDotColor(source?: string) {
+function getClientDotColor(source?: string, clientType?: string) {
+  if (clientType === 'personal' || source === 'Self-registered') {
+    return 'bg-emerald-500';
+  }
+  if (clientType === 'other' || source?.startsWith('FID ') || source?.startsWith('Client FID')) {
+    return 'bg-slate-400';
+  }
   switch (source) {
     case 'Direct Snapchain':
       return 'bg-cyan-500';
+    case 'Firefly':
+      return 'bg-blue-500';
     case 'Supercast':
       return 'bg-indigo-500';
     case 'Phaver':
       return 'bg-pink-500';
     case 'Paragraph':
-      return 'bg-emerald-500';
+      return 'bg-teal-500';
     case 'Bountycaster':
       return 'bg-amber-500';
     case 'Herocast':
@@ -1827,14 +1845,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           </div>
 
                           {/* Client Attribution Badge */}
-                          {cast.clientSource && (
+                          {(cast.clientName || cast.clientSource) && (
                             <span
+                              title={
+                                cast.signer
+                                  ? `Cryptographic Signer: ${cast.signer}\nClient FID: ${cast.clientFid || 'N/A'}\nType: ${cast.clientType || 'other'}`
+                                  : undefined
+                              }
                               className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getClientBadgeColor(
-                                cast.clientSource
+                                cast.clientName || cast.clientSource,
+                                cast.clientType
                               )}`}
                             >
-                              <span className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(cast.clientSource)}`} />
-                              {cast.clientSource}
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(
+                                  cast.clientName || cast.clientSource,
+                                  cast.clientType
+                                )}`}
+                              />
+                              {cast.clientType === 'personal'
+                                ? 'Self-registered'
+                                : cast.clientName || cast.clientSource}
                             </span>
                           )}
                         </div>
@@ -2023,14 +2054,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           </div>
                         </div>
 
-                        {currentThreadCast.clientSource && (
+                        {(currentThreadCast.clientName || currentThreadCast.clientSource) && (
                           <span
+                            title={
+                              currentThreadCast.signer
+                                ? `Cryptographic Signer: ${currentThreadCast.signer}\nClient FID: ${currentThreadCast.clientFid || 'N/A'}\nType: ${currentThreadCast.clientType || 'other'}`
+                                : undefined
+                            }
                             className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${getClientBadgeColor(
-                              currentThreadCast.clientSource
+                              currentThreadCast.clientName || currentThreadCast.clientSource,
+                              currentThreadCast.clientType
                             )}`}
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(currentThreadCast.clientSource)}`} />
-                            {currentThreadCast.clientSource}
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(
+                                currentThreadCast.clientName || currentThreadCast.clientSource,
+                                currentThreadCast.clientType
+                              )}`}
+                            />
+                            {currentThreadCast.clientType === 'personal'
+                              ? 'Self-registered'
+                              : currentThreadCast.clientName || currentThreadCast.clientSource}
                           </span>
                         )}
                       </div>
@@ -2428,16 +2472,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               </div>
 
                               <div className="flex items-center gap-2">
-                                {cast.clientSource && (
+                                {(cast.clientName || cast.clientSource) && (
                                   <span
+                                    title={
+                                      cast.signer
+                                        ? `Cryptographic Signer: ${cast.signer}\nClient FID: ${cast.clientFid || 'N/A'}\nType: ${cast.clientType || 'other'}`
+                                        : undefined
+                                    }
                                     className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getClientBadgeColor(
-                                      cast.clientSource
+                                      cast.clientName || cast.clientSource,
+                                      cast.clientType
                                     )}`}
                                   >
                                     <span
-                                      className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(cast.clientSource)}`}
+                                      className={`h-1.5 w-1.5 rounded-full ${getClientDotColor(
+                                        cast.clientName || cast.clientSource,
+                                        cast.clientType
+                                      )}`}
                                     />
-                                    {cast.clientSource}
+                                    {cast.clientType === 'personal'
+                                      ? 'Self-registered'
+                                      : cast.clientName || cast.clientSource}
                                   </span>
                                 )}
                                 <span className="text-[11px] text-slate-400">{formatTimeAgo(cast.timestamp)}</span>

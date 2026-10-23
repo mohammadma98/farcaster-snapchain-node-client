@@ -109,6 +109,60 @@ export async function initDatabaseSchema(): Promise<boolean> {
       ALTER TABLE sync_checkpoints ADD COLUMN IF NOT EXISTS last_event_id VARCHAR(64);
     `);
 
+    // 7. Known official clients registry
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS known_clients (
+        fid INTEGER PRIMARY KEY,
+        name VARCHAR(64) NOT NULL,
+        username VARCHAR(64),
+        brand_color VARCHAR(32),
+        icon_url TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      INSERT INTO known_clients (fid, name, username, brand_color) VALUES
+        (9152, 'Warpcast', 'warpcast', '#7C65C1'),
+        (16823, 'Firefly', 'fireflyapp', '#3B82F6'),
+        (194, 'Supercast', 'supercast', '#6366F1'),
+        (21544, 'Paragraph', 'paragraph', '#10B981'),
+        (1325, 'Phaver', 'phaver', '#EC4899')
+      ON CONFLICT (fid) DO UPDATE SET
+        name = EXCLUDED.name,
+        username = EXCLUDED.username,
+        brand_color = EXCLUDED.brand_color;
+    `);
+
+    // 8. Signer attribution L2 persistent cache
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS signers (
+        key VARCHAR(66) PRIMARY KEY,
+        fid INTEGER NOT NULL,
+        request_fid INTEGER NOT NULL,
+        client_type VARCHAR(20) NOT NULL, -- 'known' | 'personal' | 'other'
+        client_name VARCHAR(128) NOT NULL,
+        client_username VARCHAR(64),
+        source VARCHAR(20) DEFAULT 'offchain',
+        expires_at BIGINT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_signers_fid ON signers(fid);
+      CREATE INDEX IF NOT EXISTS idx_signers_request_fid ON signers(request_fid);
+      CREATE INDEX IF NOT EXISTS idx_signers_client_type ON signers(client_type);
+    `);
+
+    // 9. Extend Casts table with client attribution columns and composite indexes
+    await client.query(`
+      ALTER TABLE casts ADD COLUMN IF NOT EXISTS signer VARCHAR(66);
+      ALTER TABLE casts ADD COLUMN IF NOT EXISTS client_fid INTEGER;
+      ALTER TABLE casts ADD COLUMN IF NOT EXISTS client_type VARCHAR(20) DEFAULT 'other';
+      ALTER TABLE casts ADD COLUMN IF NOT EXISTS client_name VARCHAR(128);
+
+      CREATE INDEX IF NOT EXISTS idx_casts_client_type_timestamp ON casts(client_type, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_casts_client_fid_timestamp ON casts(client_fid, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_casts_signer ON casts(signer);
+    `);
+
     await client.query('COMMIT');
     migrationExecuted = true;
     return true;

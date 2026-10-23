@@ -110,12 +110,19 @@ export class CastRepository {
 
     await pool.query(
       `
-      INSERT INTO casts (hash, fid, text, timestamp, parent_hash, parent_fid, embeds, client_source, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      INSERT INTO casts (
+        hash, fid, text, timestamp, parent_hash, parent_fid, embeds,
+        client_source, signer, client_fid, client_type, client_name, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
       ON CONFLICT (hash) DO UPDATE SET
         text = EXCLUDED.text,
         embeds = COALESCE(EXCLUDED.embeds, casts.embeds),
-        client_source = COALESCE(EXCLUDED.client_source, casts.client_source)
+        client_source = COALESCE(EXCLUDED.client_source, casts.client_source),
+        signer = COALESCE(EXCLUDED.signer, casts.signer),
+        client_fid = COALESCE(EXCLUDED.client_fid, casts.client_fid),
+        client_type = COALESCE(EXCLUDED.client_type, casts.client_type),
+        client_name = COALESCE(EXCLUDED.client_name, casts.client_name)
     `,
       [
         cast.hash,
@@ -126,6 +133,10 @@ export class CastRepository {
         parentFid,
         JSON.stringify(cast.embeds || []),
         cast.clientSource || null,
+        cast.signer || null,
+        cast.clientFid || null,
+        cast.clientType || 'other',
+        cast.clientName || null,
       ]
     );
 
@@ -194,6 +205,10 @@ export class CastRepository {
     limit?: number;
     cursorTimestamp?: number;
     sourceFilter?: string;
+    clientType?: string;
+    clientFids?: number[];
+    excludeClientFids?: number[];
+    onlySelfRegistered?: boolean;
   }): Promise<FarcasterCast[]> {
     const pool = getDatabasePool();
     const limit = Math.max(1, Math.min(options.limit || 5, 50));
@@ -210,6 +225,10 @@ export class CastRepository {
         c.parent_fid,
         c.embeds,
         c.client_source,
+        c.signer,
+        c.client_fid,
+        c.client_type,
+        c.client_name,
         u.username,
         u.display_name,
         u.pfp_url,
@@ -266,6 +285,36 @@ export class CastRepository {
       idx++;
     }
 
+    // Precise cryptographic client category filtering
+    if (options.clientType && options.clientType !== 'all') {
+      const types = options.clientType.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (types.length === 1) {
+        whereClauses.push(`c.client_type = $${idx}`);
+        params.push(types[0]);
+        idx++;
+      } else if (types.length > 1) {
+        whereClauses.push(`c.client_type = ANY($${idx}::varchar[])`);
+        params.push(types);
+        idx++;
+      }
+    }
+
+    if (options.clientFids && options.clientFids.length > 0) {
+      whereClauses.push(`c.client_fid = ANY($${idx}::integer[])`);
+      params.push(options.clientFids);
+      idx++;
+    }
+
+    if (options.excludeClientFids && options.excludeClientFids.length > 0) {
+      whereClauses.push(`(c.client_fid IS NULL OR NOT (c.client_fid = ANY($${idx}::integer[])))`);
+      params.push(options.excludeClientFids);
+      idx++;
+    }
+
+    if (options.onlySelfRegistered) {
+      whereClauses.push(`(c.client_type = 'personal' OR c.client_fid = c.fid)`);
+    }
+
     if (whereClauses.length > 0) {
       query += ` WHERE ${whereClauses.join(' AND ')}`;
     }
@@ -292,6 +341,10 @@ export class CastRepository {
         c.parent_fid,
         c.embeds,
         c.client_source,
+        c.signer,
+        c.client_fid,
+        c.client_type,
+        c.client_name,
         u.username,
         u.display_name,
         u.pfp_url,
@@ -337,6 +390,10 @@ export class CastRepository {
         c.parent_fid,
         c.embeds,
         c.client_source,
+        c.signer,
+        c.client_fid,
+        c.client_type,
+        c.client_name,
         u.username,
         u.display_name,
         u.pfp_url,
@@ -507,7 +564,11 @@ function mapRowToCast(row: any): FarcasterCast {
     fid: row.fid,
     text: row.text,
     timestamp: Number(row.timestamp),
-    clientSource: row.client_source || 'Direct Snapchain',
+    clientSource: row.client_name || row.client_source || 'Direct Snapchain',
+    signer: row.signer || undefined,
+    clientFid: row.client_fid ? Number(row.client_fid) : undefined,
+    clientType: row.client_type || 'other',
+    clientName: row.client_name || row.client_source || 'Direct Snapchain',
     embeds,
     parentCastId: row.parent_hash ? { fid: row.parent_fid || 0, hash: row.parent_hash } : undefined,
     author: row.username
@@ -526,4 +587,25 @@ function mapRowToCast(row: any): FarcasterCast {
     },
     repliesCount: Number(row.replies_count || 0),
   };
+}
+
+export class KnownClientRepository {
+  static async getAllClients(): Promise<Array<{ fid: number; name: string; username?: string; brandColor?: string }>> {
+    const pool = getDatabasePool();
+    const res = await pool.query('SELECT * FROM known_clients ORDER BY fid ASC');
+    return res.rows.map((r) => ({
+      fid: r.fid,
+      name: r.name,
+      username: r.username,
+      brandColor: r.brand_color,
+    }));
+  }
+}
+
+export class SignerRepository {
+  static async getSignersByFid(fid: number): Promise<any[]> {
+    const pool = getDatabasePool();
+    const res = await pool.query('SELECT * FROM signers WHERE fid = $1 ORDER BY updated_at DESC', [fid]);
+    return res.rows;
+  }
 }

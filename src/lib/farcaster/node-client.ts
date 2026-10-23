@@ -17,6 +17,23 @@ import { createPublicClient, http } from 'viem';
 import { optimism } from 'viem/chains';
 import { FarcasterCast, FarcasterUser, SnapchainInfo } from './types';
 import { identifyCastClient } from './client-filter';
+import { SignerAttributionService, normalizeHex } from './attribution';
+
+export function extractSignerHex(rawSigner: any): string | undefined {
+  if (!rawSigner) return undefined;
+  if (typeof rawSigner === 'string') {
+    if (rawSigner.startsWith('0x')) return rawSigner.toLowerCase();
+    try {
+      return `0x${Buffer.from(rawSigner, 'base64').toString('hex')}`.toLowerCase();
+    } catch {
+      return undefined;
+    }
+  }
+  if (rawSigner instanceof Uint8Array || Buffer.isBuffer(rawSigner)) {
+    return `0x${Buffer.from(rawSigner).toString('hex')}`.toLowerCase();
+  }
+  return undefined;
+}
 
 const ID_REGISTRY_ADDRESS = '0x00000000fc6c5f01fc30151999387bb99a9f489b';
 const ID_REGISTRY_ABI = [
@@ -421,6 +438,7 @@ export class SnapchainNodeClient {
             fid: msg.data.fid,
             text: castBody.text || '',
             timestamp,
+            signer: extractSignerHex(msg.signer),
             embeds: (castBody.embeds || []).map((e: any) => ({
               url: e.url,
               castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
@@ -440,6 +458,27 @@ export class SnapchainNodeClient {
           cast.clientSource = attr.clientName;
 
           casts.push(cast);
+        }
+
+        // Batch resolve cryptographic signer attributions
+        if (casts.length > 0) {
+          try {
+            const attributions = await SignerAttributionService.resolveBatch(casts, cleanUrl);
+            for (const c of casts) {
+              if (c.signer) {
+                const attr = attributions.get(c.signer);
+                if (attr) {
+                  c.clientFid = attr.clientFid;
+                  c.clientType = attr.clientType;
+                  c.clientName = attr.clientName;
+                  c.clientUsername = attr.clientUsername;
+                  c.clientSource = attr.clientName;
+                }
+              }
+            }
+          } catch {
+            // Keep heuristic clientSource if resolution times out
+          }
         }
 
         return casts;
@@ -602,6 +641,7 @@ export class SnapchainNodeClient {
           fid: msg.data?.fid || 0,
           text: castBody.text || '',
           timestamp,
+          signer: extractSignerHex(msg.signer),
           embeds: (castBody.embeds || []).map((e: any) => ({
             url: e.url,
             castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
@@ -614,6 +654,26 @@ export class SnapchainNodeClient {
         const attr = identifyCastClient(cast);
         cast.clientSource = attr.clientName;
         casts.push(cast);
+      }
+
+      if (casts.length > 0) {
+        try {
+          const attributions = await SignerAttributionService.resolveBatch(casts, cleanUrl);
+          for (const c of casts) {
+            if (c.signer) {
+              const attr = attributions.get(c.signer);
+              if (attr) {
+                c.clientFid = attr.clientFid;
+                c.clientType = attr.clientType;
+                c.clientName = attr.clientName;
+                c.clientUsername = attr.clientUsername;
+                c.clientSource = attr.clientName;
+              }
+            }
+          }
+        } catch {
+          // Keep heuristic
+        }
       }
 
       return casts;
@@ -657,6 +717,7 @@ export class SnapchainNodeClient {
             fid: msg.data?.fid || fid,
             text: castBody.text || '',
             timestamp,
+            signer: extractSignerHex(msg.signer),
             embeds: (castBody.embeds || []).map((e: any) => ({
               url: e.url,
               castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
@@ -674,6 +735,22 @@ export class SnapchainNodeClient {
 
           const attr = identifyCastClient(cast);
           cast.clientSource = attr.clientName;
+
+          if (cast.signer) {
+            try {
+              const details = await SignerAttributionService.resolveSigner(cast.fid, cast.signer, cleanUrl);
+              if (details) {
+                cast.clientFid = details.clientFid;
+                cast.clientType = details.clientType;
+                cast.clientName = details.clientName;
+                cast.clientUsername = details.clientUsername;
+                cast.clientSource = details.clientName;
+              }
+            } catch {
+              // fallback
+            }
+          }
+
           nodeCast = cast;
         }
       }
@@ -726,6 +803,7 @@ export class SnapchainNodeClient {
           fid: msg.data?.fid || 0,
           text: castBody.text || '',
           timestamp,
+          signer: extractSignerHex(msg.signer),
           embeds: (castBody.embeds || []).map((e: any) => ({
             url: e.url,
             castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
@@ -736,6 +814,26 @@ export class SnapchainNodeClient {
         const attr = identifyCastClient(replyCast);
         replyCast.clientSource = attr.clientName;
         replies.push(replyCast);
+      }
+
+      if (replies.length > 0) {
+        try {
+          const attributions = await SignerAttributionService.resolveBatch(replies, cleanUrl);
+          for (const r of replies) {
+            if (r.signer) {
+              const attr = attributions.get(r.signer);
+              if (attr) {
+                r.clientFid = attr.clientFid;
+                r.clientType = attr.clientType;
+                r.clientName = attr.clientName;
+                r.clientUsername = attr.clientUsername;
+                r.clientSource = attr.clientName;
+              }
+            }
+          }
+        } catch {
+          // Keep heuristic
+        }
       }
 
       return replies;
