@@ -471,8 +471,8 @@ export class SnapchainNodeClient {
   /**
    * Extract primary wallet address (Ethereum & Solana) directly from the Farcaster protocol:
    * 1. Protocol user data: USER_DATA_PRIMARY_ADDRESS_ETHEREUM (type 11) & USER_DATA_PRIMARY_ADDRESS_SOLANA (type 12)
-   * 2. Fallback: First verified Ethereum address in verificationsByFid
-   * 3. Fallback: On-chain custody address from onChainEventsByFid (EVENT_TYPE_ID_REGISTER)
+   *    (picks latest timestamp if multiple entries exist)
+   * 2. Fallback: Most recent verified Ethereum address in verificationsByFid
    */
   async getPrimaryWalletAddress(
     fid: number,
@@ -486,6 +486,8 @@ export class SnapchainNodeClient {
     let ethAddress: string | null = null;
     let solAddress: string | null = null;
     let source: 'primary' | 'verification' | null = null;
+    let latestEthTimestamp = -1;
+    let latestSolTimestamp = -1;
 
     try {
       const userRes = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
@@ -497,16 +499,23 @@ export class SnapchainNodeClient {
         const messages = data.messages || [];
         for (const msg of messages) {
           const body = msg.data?.userDataBody || msg.data?.user_data_body;
+          const ts = Number(msg.data?.timestamp) || 0;
           if (!body) continue;
           const typeStr = String(body.type || '').toUpperCase();
           if (typeStr === '11' || typeStr === 'USER_DATA_PRIMARY_ADDRESS_ETHEREUM') {
             if (body.value && typeof body.value === 'string' && body.value.startsWith('0x')) {
-              ethAddress = body.value;
-              source = 'primary';
+              if (ts >= latestEthTimestamp) {
+                ethAddress = body.value;
+                latestEthTimestamp = ts;
+                source = 'primary';
+              }
             }
           } else if (typeStr === '12' || typeStr === 'USER_DATA_PRIMARY_ADDRESS_SOLANA') {
             if (body.value) {
-              solAddress = body.value;
+              if (ts >= latestSolTimestamp) {
+                solAddress = body.value;
+                latestSolTimestamp = ts;
+              }
             }
           }
         }
@@ -515,7 +524,7 @@ export class SnapchainNodeClient {
       // ignore
     }
 
-    // Fallback: First verified Ethereum address
+    // Fallback: Latest verified Ethereum address
     if (!ethAddress) {
       try {
         const verifRes = await fetch(`${cleanUrl}/v1/verificationsByFid?fid=${fid}`, {
@@ -525,15 +534,19 @@ export class SnapchainNodeClient {
         if (verifRes.ok) {
           const data = await verifRes.json();
           const messages = data.messages || [];
+          let latestVerifTs = -1;
           for (const msg of messages) {
             const body = msg.data?.verificationAddAddressBody || msg.data?.verification_add_address_body;
+            const ts = Number(msg.data?.timestamp) || 0;
             if (body) {
               const proto = String(body.protocol || '').toUpperCase();
               if (proto === '0' || proto === 'PROTOCOL_ETHEREUM' || proto === 'ETHEREUM') {
                 if (body.address && typeof body.address === 'string' && body.address.startsWith('0x')) {
-                  ethAddress = body.address;
-                  source = 'verification';
-                  break;
+                  if (ts >= latestVerifTs) {
+                    ethAddress = body.address;
+                    latestVerifTs = ts;
+                    source = 'verification';
+                  }
                 }
               }
             }
@@ -545,6 +558,54 @@ export class SnapchainNodeClient {
     }
 
     return { ethAddress, solAddress, source };
+  }
+
+  /**
+   * Fetch all verified Ethereum addresses registered by an FID, sorted by newest first.
+   */
+  async getAllVerifiedEthAddresses(
+    fid: number,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<string[]> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const verified: Array<{ address: string; timestamp: number }> = [];
+
+    try {
+      const verifRes = await fetch(`${cleanUrl}/v1/verificationsByFid?fid=${fid}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (verifRes.ok) {
+        const data = await verifRes.json();
+        const messages = data.messages || [];
+        for (const msg of messages) {
+          const body = msg.data?.verificationAddAddressBody || msg.data?.verification_add_address_body;
+          const ts = Number(msg.data?.timestamp) || 0;
+          if (body) {
+            const proto = String(body.protocol || '').toUpperCase();
+            if (proto === '0' || proto === 'PROTOCOL_ETHEREUM' || proto === 'ETHEREUM') {
+              if (body.address && typeof body.address === 'string' && body.address.startsWith('0x')) {
+                verified.push({ address: body.address.toLowerCase(), timestamp: ts });
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Sort descending by timestamp (newest first) and deduplicate
+    verified.sort((a, b) => b.timestamp - a.timestamp);
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const v of verified) {
+      if (!seen.has(v.address)) {
+        seen.add(v.address);
+        result.push(v.address);
+      }
+    }
+    return result;
   }
 
   /**

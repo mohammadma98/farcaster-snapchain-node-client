@@ -93,7 +93,9 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
       const queryParams = new URLSearchParams();
       queryParams.set('fid', String(session.fid));
 
-      const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
+      const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}&_t=${Date.now()}`, {
+        cache: 'no-store',
+      });
       const data = await res.json();
 
       if (data.status === 'ok') {
