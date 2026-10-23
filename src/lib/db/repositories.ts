@@ -143,11 +143,11 @@ export class CastRepository {
   }
 
   /**
-   * Prune feed to maintain at most maxCasts (default 1000).
-   * Eviction priority: Oldest casts with the least engagement (likes + recasts + replies)
-   * are removed first, preserving highly engaged casts longer.
+   * Prune feed to maintain at most maxCasts (default 25000).
+   * Strict FIFO time-based eviction: Oldest root casts (ordered strictly by timestamp ASC)
+   * are removed first to ensure lightweight storage without engagement-based bias.
    */
-  static async pruneFeed(maxCasts = 1000): Promise<number> {
+  static async pruneFeed(maxCasts = 25000): Promise<number> {
     const pool = getDatabasePool();
     try {
       const countRes = await pool.query(
@@ -161,13 +161,10 @@ export class CastRepository {
         `
         DELETE FROM casts
         WHERE hash IN (
-          SELECT c.hash
-          FROM casts c
-          LEFT JOIN cast_stats cs ON cs.cast_hash = c.hash
-          WHERE c.parent_hash IS NULL
-          ORDER BY
-            (COALESCE(cs.likes_count, 0) + COALESCE(cs.recasts_count, 0) + COALESCE(cs.replies_count, 0)) ASC,
-            c.timestamp ASC
+          SELECT hash
+          FROM casts
+          WHERE parent_hash IS NULL
+          ORDER BY timestamp ASC
           LIMIT $1
         )
         `,
@@ -177,6 +174,11 @@ export class CastRepository {
       // Clean up orphaned stats
       await pool.query(
         'DELETE FROM cast_stats WHERE cast_hash NOT IN (SELECT hash FROM casts)'
+      ).catch(() => {});
+
+      // Clean up orphaned replies whose root cast was pruned
+      await pool.query(
+        'DELETE FROM casts WHERE parent_hash IS NOT NULL AND parent_hash NOT IN (SELECT hash FROM casts)'
       ).catch(() => {});
 
       return deleteRes.rowCount || 0;

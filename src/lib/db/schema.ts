@@ -53,6 +53,11 @@ export async function initDatabaseSchema(): Promise<boolean> {
       CREATE INDEX IF NOT EXISTS idx_casts_fid_timestamp ON casts(fid, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_casts_timestamp ON casts(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_casts_parent_hash ON casts(parent_hash) WHERE parent_hash IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_casts_root_timestamp_asc ON casts(timestamp ASC) WHERE parent_hash IS NULL;
+      ALTER TABLE users ALTER COLUMN username TYPE TEXT;
+      ALTER TABLE users ALTER COLUMN display_name TYPE TEXT;
+      ALTER TABLE users ALTER COLUMN bio TYPE TEXT;
+      ALTER TABLE casts ALTER COLUMN client_source TYPE TEXT;
     `);
 
     // 3. User Follows table (Normalized)

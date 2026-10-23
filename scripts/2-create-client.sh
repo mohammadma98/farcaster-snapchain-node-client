@@ -196,7 +196,7 @@ fi
 echo -e "  ${GREEN}✓ PostgreSQL Indexer is running (512MB cap, Zero-Config)${NC}"
 
 # ------------------------------------------------------------------------------
-# 4.6 Launch Sovereign Feed Indexer Worker (1000-cast smart eviction, Live Events)
+# 4.6 Launch Sovereign Feed Indexer Worker (25,000-cast FIFO eviction, Live Events)
 # ------------------------------------------------------------------------------
 echo -e "\n${CYAN}${BOLD}Launching Sovereign Feed Indexer Worker Container (farcaster-feed-worker)...${NC}"
 $DOCKER_BIN rm -f farcaster-feed-worker > /dev/null 2>&1 || true
@@ -206,9 +206,9 @@ $DOCKER_BIN run -d \
     $WORKER_NET_ARGS \
     -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
     -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
-    -e MAX_FEED_CASTS="1000" \
+    -e MAX_FEED_CASTS="25000" \
     farcaster-client npm run worker > /dev/null 2>&1 || true
-echo -e "  ${GREEN}✓ Feed Indexer Worker is running (Live Event Stream, max 1000 casts)${NC}"
+echo -e "  ${GREEN}✓ Feed Indexer Worker is running (Live Event Stream, max 25,000 casts FIFO)${NC}"
 
 # ------------------------------------------------------------------------------
 # 5. Launch Client (Interactive CLI or Background Web UI Container)
@@ -257,7 +257,7 @@ else
     echo -e "  - Web Client URL:  ${BOLD}${CYAN}http://${PUBLIC_IP}:3000${NC}"
     echo -e "  - Local Host URL:  ${BOLD}http://localhost:3000${NC}"
     echo -e "  - REST API Feed:   ${BOLD}http://${PUBLIC_IP}:3000/api/feed${NC}"
-    echo -e "  - Feed Indexer:    ${BOLD}farcaster-feed-worker (Live Event Stream, 1000-cast smart eviction)${NC}"
+    echo -e "  - Feed Indexer:    ${BOLD}farcaster-feed-worker (Live Event Stream, 25,000-cast FIFO eviction)${NC}"
     echo -e "  - Target Node RPC: ${BOLD}${READ_NODE_URL}${NC}"
     echo -e "  - Postgres Engine: ${BOLD}farcaster-postgres (512MB RAM cap, Volume: farcaster-pgdata)${NC}"
     echo -e "  - Container Name:  ${BOLD}farcaster-client${NC} (Status: Running)"

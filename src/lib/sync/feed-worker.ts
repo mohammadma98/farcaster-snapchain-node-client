@@ -21,10 +21,11 @@ export class FeedWorker {
   private isStopped = false;
   private userCache = new Map<number, FarcasterUser>();
   private lockClient: any = null;
+  private shardIds: number[] = [1, 2];
 
   constructor(options?: FeedWorkerOptions) {
     this.nodeUrl = (options?.nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381').replace(/\/$/, '');
-    this.maxCasts = options?.maxCasts || parseInt(process.env.MAX_FEED_CASTS || '1000', 10);
+    this.maxCasts = options?.maxCasts || parseInt(process.env.MAX_FEED_CASTS || '25000', 10);
     this.pollIntervalMs = options?.pollIntervalMs || 2500;
   }
 
@@ -60,7 +61,7 @@ export class FeedWorker {
 
     this.isRunning = true;
     this.isStopped = false;
-    console.log(`[FeedWorker] Started. Ingesting live events from ${this.nodeUrl} (Max: ${this.maxCasts} casts)...`);
+    console.log(`[FeedWorker] Started. Ingesting live events from ${this.nodeUrl} (Max: ${this.maxCasts} casts, FIFO time-based)...`);
 
     this.runLoop().catch((err) => {
       console.error('[FeedWorker] Loop crash:', err);
@@ -88,20 +89,42 @@ export class FeedWorker {
   }
 
   /**
-   * Main Event Consumption Loop
+   * Main Event Consumption Loop (Multi-Shard Aware)
    */
   private async runLoop(): Promise<void> {
-    const CHECKPOINT_KEY = 'snapchain_live_events';
-    let checkpoint = await CheckpointRepository.getEventCheckpoint(CHECKPOINT_KEY);
-    let lastEventId: string | null = checkpoint?.lastEventId || null;
-
-    // Initial Backfill: If no event checkpoint exists, start from recent tip
-    if (!lastEventId) {
-      console.log('[FeedWorker] No prior checkpoint found. Seeding initial tip from live node...');
-      lastEventId = await this.seedInitialTip();
-      if (lastEventId) {
-        await CheckpointRepository.updateEventCheckpoint(CHECKPOINT_KEY, lastEventId);
+    // 1. Detect active shards from node info (defaults to [1, 2])
+    try {
+      const infoRes = await fetch(`${this.nodeUrl}/v1/info`, { signal: AbortSignal.timeout(3000) });
+      if (infoRes.ok) {
+        const info = await infoRes.json();
+        const activeShards = (info.shardInfos || [])
+          .map((s: any) => s.shardId)
+          .filter((id: number) => id > 0);
+        if (activeShards.length > 0) {
+          this.shardIds = activeShards;
+        }
       }
+    } catch {}
+
+    console.log(`[FeedWorker] Multi-shard indexer tracking shards: [${this.shardIds.join(', ')}]`);
+
+    // 2. Initialize per-shard checkpoints
+    const shardCheckpoints = new Map<number, string | null>();
+
+    for (const shardId of this.shardIds) {
+      const checkpointKey = `snapchain_live_events_shard_${shardId}`;
+      const cp = await CheckpointRepository.getEventCheckpoint(checkpointKey);
+      let lastEventId = cp?.lastEventId || null;
+
+      if (!lastEventId) {
+        console.log(`[FeedWorker] Seeding live tip for shard ${shardId}...`);
+        lastEventId = await this.seedShardTip(shardId);
+        if (lastEventId) {
+          await CheckpointRepository.updateEventCheckpoint(checkpointKey, lastEventId);
+        }
+      }
+
+      shardCheckpoints.set(shardId, lastEventId);
     }
 
     let loopCount = 0;
@@ -109,74 +132,117 @@ export class FeedWorker {
     while (!this.isStopped) {
       try {
         loopCount++;
-        const url = lastEventId
-          ? `${this.nodeUrl}/v1/events?from_event_id=${lastEventId}&pageSize=100`
-          : `${this.nodeUrl}/v1/events?reverse=true&pageSize=100`;
+        let totalNewCasts = 0;
 
-        const res = await fetch(url, {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        });
+        for (const shardId of this.shardIds) {
+          const checkpointKey = `snapchain_live_events_shard_${shardId}`;
+          let lastEventId = shardCheckpoints.get(shardId) || null;
 
-        if (res.ok) {
-          const data = await res.json();
-          const events = data.events || [];
+          if (!lastEventId) {
+            lastEventId = await this.seedShardTip(shardId);
+            if (lastEventId) {
+              shardCheckpoints.set(shardId, lastEventId);
+              await CheckpointRepository.updateEventCheckpoint(checkpointKey, lastEventId);
+            }
+            continue;
+          }
 
-          if (events.length > 0) {
+          let batchCount = 0;
+          let hasMore = true;
+
+          while (hasMore && batchCount < 5 && !this.isStopped) {
+            batchCount++;
+            const url = `${this.nodeUrl}/v1/events?shard_index=${shardId}&from_event_id=${lastEventId}&pageSize=100`;
+
+            const res = await fetch(url, {
+              headers: { Accept: 'application/json' },
+              signal: AbortSignal.timeout(5000),
+            });
+
+            if (!res.ok) {
+              hasMore = false;
+              break;
+            }
+
+            const data = await res.json();
+            const events: any[] = data.events || [];
+
+            if (events.length <= 1) {
+              hasMore = false;
+            }
+
             let newestEventId: string | null = lastEventId;
-            let newCastsCount = 0;
+            let shardNewCasts = 0;
 
             for (const ev of events) {
-              if (ev.id) {
-                newestEventId = String(ev.id);
+              const evIdStr = ev.id ? String(ev.id) : null;
+              // Skip the boundary event if it matches lastEventId
+              if (lastEventId && evIdStr === lastEventId) {
+                continue;
               }
-              const processed = await this.processEvent(ev);
-              if (processed) newCastsCount++;
+
+              if (evIdStr) {
+                newestEventId = evIdStr;
+              }
+
+              try {
+                const processed = await this.processEvent(ev);
+                if (processed) {
+                  shardNewCasts++;
+                  totalNewCasts++;
+                }
+              } catch (err: any) {
+                console.warn(`[FeedWorker] Failed to process event ${ev.id} on shard ${shardId}:`, err.message);
+              }
             }
 
             if (newestEventId && newestEventId !== lastEventId) {
               lastEventId = newestEventId;
-              await CheckpointRepository.updateEventCheckpoint(CHECKPOINT_KEY, lastEventId);
-            }
-
-            // Prune excess casts beyond max capacity
-            if (newCastsCount > 0 || loopCount % 20 === 0) {
-              await CastRepository.pruneFeed(this.maxCasts);
+              shardCheckpoints.set(shardId, lastEventId);
+              await CheckpointRepository.updateEventCheckpoint(checkpointKey, lastEventId);
+            } else {
+              hasMore = false;
             }
           }
         }
+
+        // Prune excess casts beyond max capacity (strictly FIFO oldest first)
+        if (totalNewCasts > 0 || loopCount % 20 === 0) {
+          await CastRepository.pruneFeed(this.maxCasts);
+        }
       } catch (err: any) {
-        // Node briefly restarting or syncing
         if (err.name !== 'TimeoutError' && !err.message?.includes('aborted')) {
           console.warn('[FeedWorker] Event poll warning:', err.message);
         }
       }
 
-      // Rest interval before next poll
       await new Promise((resolve) => setTimeout(resolve, this.pollIntervalMs));
     }
   }
 
   /**
-   * Seed the initial feed with newest live casts from the node tip
+   * Seed a specific shard with newest live events from its tip
    */
-  private async seedInitialTip(): Promise<string | null> {
+  private async seedShardTip(shardId: number): Promise<string | null> {
     try {
-      const res = await fetch(`${this.nodeUrl}/v1/events?reverse=true&pageSize=200`, {
+      const res = await fetch(`${this.nodeUrl}/v1/events?shard_index=${shardId}&reverse=true&pageSize=100`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) return null;
 
       const data = await res.json();
-      const events = data.events || [];
-      let newestEventId: string | null = null;
+      const events: any[] = data.events || [];
+      if (events.length === 0) return null;
 
-      for (const ev of events) {
-        if (!newestEventId && ev.id) {
-          newestEventId = String(ev.id);
-        }
-        await this.processEvent(ev);
+      const newestEventId = String(events[0].id);
+
+      // Process historical tip in chronological order (oldest to newest)
+      const forwardEvents = [...events].reverse();
+      for (const ev of forwardEvents) {
+        try {
+          await this.processEvent(ev);
+        } catch {}
       }
 
       await CastRepository.pruneFeed(this.maxCasts);
@@ -293,28 +359,30 @@ export class FeedWorker {
     }
 
     const pool = getDatabasePool();
-    const existing = await pool.query(
-      'SELECT fid, username, display_name, pfp_url, bio FROM users WHERE fid = $1',
-      [fid]
-    );
+    try {
+      const existing = await pool.query(
+        'SELECT fid, username, display_name, pfp_url, bio FROM users WHERE fid = $1',
+        [fid]
+      );
 
-    if (existing.rows.length > 0) {
-      const u: FarcasterUser = {
-        fid: existing.rows[0].fid,
-        username: existing.rows[0].username,
-        displayName: existing.rows[0].display_name,
-        pfpUrl: existing.rows[0].pfp_url,
-        bio: existing.rows[0].bio,
-      };
-      this.userCache.set(fid, u);
-      return u;
-    }
+      if (existing.rows.length > 0) {
+        const u: FarcasterUser = {
+          fid: existing.rows[0].fid,
+          username: existing.rows[0].username,
+          displayName: existing.rows[0].display_name,
+          pfpUrl: existing.rows[0].pfp_url,
+          bio: existing.rows[0].bio,
+        };
+        this.userCache.set(fid, u);
+        return u;
+      }
+    } catch {}
 
     // Fetch user profile from node
     try {
       const res = await fetch(`${this.nodeUrl}/v1/userDataByFid?fid=${fid}`, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(2500),
       });
 
       if (res.ok) {
@@ -334,7 +402,7 @@ export class FeedWorker {
         profile.displayName = profile.displayName || profile.username || `FID ${fid}`;
         profile.pfpUrl = profile.pfpUrl || `https://avatar.vercel.sh/${fid}`;
 
-        await UserRepository.upsertUser(profile);
+        await UserRepository.upsertUser(profile).catch(() => {});
         this.userCache.set(fid, profile);
         return profile;
       }
@@ -357,13 +425,13 @@ export class FeedWorker {
     const t = String(type || '').toUpperCase();
     const pool = getDatabasePool();
     if (t === '1' || t === 'USER_DATA_TYPE_PFP' || t === 'PFP') {
-      await pool.query('UPDATE users SET pfp_url = $1 WHERE fid = $2', [value, fid]);
+      await pool.query('UPDATE users SET pfp_url = $1 WHERE fid = $2', [value, fid]).catch(() => {});
       if (this.userCache.has(fid)) this.userCache.get(fid)!.pfpUrl = value;
     } else if (t === '2' || t === 'USER_DATA_TYPE_DISPLAY' || t === 'DISPLAY') {
-      await pool.query('UPDATE users SET display_name = $1 WHERE fid = $2', [value, fid]);
+      await pool.query('UPDATE users SET display_name = $1 WHERE fid = $2', [value, fid]).catch(() => {});
       if (this.userCache.has(fid)) this.userCache.get(fid)!.displayName = value;
     } else if (t === '6' || t === 'USER_DATA_TYPE_USERNAME' || t === 'USERNAME') {
-      await pool.query('UPDATE users SET username = $1 WHERE fid = $2', [value, fid]);
+      await pool.query('UPDATE users SET username = $1 WHERE fid = $2', [value, fid]).catch(() => {});
       if (this.userCache.has(fid)) this.userCache.get(fid)!.username = value;
     }
   }
