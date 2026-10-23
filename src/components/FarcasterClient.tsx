@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Home,
   Search,
@@ -198,6 +198,14 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isFollowingCurrentProfile, setIsFollowingCurrentProfile] = useState(false);
 
+  // Stable refs for routing and session to prevent cascade re-render loops
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const nodeUrlRef = useRef(nodeUrl);
+  nodeUrlRef.current = nodeUrl;
+  const initialRouteCheckedRef = useRef(false);
+  const lastAppliedSlugRef = useRef<string | null>(null);
+
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FarcasterUser[]>([]);
@@ -388,17 +396,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 parsed.fid === 432209 || data.user.username?.toLowerCase() === 'mohammad98'
                   ? '/images/mohammad98.jpg'
                   : data.user.pfpUrl || parsed.pfpUrl;
-              const updatedSession: UserSession = {
-                ...parsed,
-                username: data.user.username || parsed.username,
-                displayName: data.user.displayName || parsed.displayName,
-                pfpUrl: pfp,
-                bio: data.user.bio || parsed.bio,
-                followerCount: data.user.followerCount || parsed.followerCount,
-                followingCount: data.user.followingCount || parsed.followingCount,
-              };
-              setSession(updatedSession);
-              localStorage.setItem('farcaster_session', JSON.stringify(updatedSession));
+              const hasChanged =
+                (data.user.username && data.user.username !== parsed.username) ||
+                (data.user.displayName && data.user.displayName !== parsed.displayName) ||
+                (pfp && pfp !== parsed.pfpUrl) ||
+                (data.user.bio && data.user.bio !== parsed.bio) ||
+                (data.user.followerCount !== undefined && data.user.followerCount !== parsed.followerCount) ||
+                (data.user.followingCount !== undefined && data.user.followingCount !== parsed.followingCount);
+
+              if (hasChanged) {
+                const updatedSession: UserSession = {
+                  ...parsed,
+                  username: data.user.username || parsed.username,
+                  displayName: data.user.displayName || parsed.displayName,
+                  pfpUrl: pfp,
+                  bio: data.user.bio || parsed.bio,
+                  followerCount: data.user.followerCount ?? parsed.followerCount,
+                  followingCount: data.user.followingCount ?? parsed.followingCount,
+                };
+                setSession(updatedSession);
+                localStorage.setItem('farcaster_session', JSON.stringify(updatedSession));
+              }
             }
           })
           .catch(() => {});
@@ -569,20 +587,36 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         }
 
         // Keep session updated if viewing logged-in profile
-        if (session && session.fid === data.user.fid) {
-          const updated: UserSession = {
-            ...session,
-            username: data.user.username || session.username,
-            displayName: data.user.displayName || session.displayName,
-            pfpUrl: data.user.pfpUrl || session.pfpUrl,
-            bio: data.user.bio || session.bio,
-            followerCount: data.user.followerCount || session.followerCount,
-            followingCount: data.user.followingCount || session.followingCount,
-          };
-          setSession(updated);
-          try {
-            localStorage.setItem('farcaster_session', JSON.stringify(updated));
-          } catch {}
+        const activeSession = sessionRef.current || session;
+        if (activeSession && activeSession.fid === data.user.fid) {
+          const pfp =
+            activeSession.fid === 432209 || data.user.username?.toLowerCase() === 'mohammad98'
+              ? '/images/mohammad98.jpg'
+              : data.user.pfpUrl || activeSession.pfpUrl;
+
+          const hasChanged =
+            (data.user.username && data.user.username !== activeSession.username) ||
+            (data.user.displayName && data.user.displayName !== activeSession.displayName) ||
+            (pfp && pfp !== activeSession.pfpUrl) ||
+            (data.user.bio && data.user.bio !== activeSession.bio) ||
+            (data.user.followerCount !== undefined && data.user.followerCount !== activeSession.followerCount) ||
+            (data.user.followingCount !== undefined && data.user.followingCount !== activeSession.followingCount);
+
+          if (hasChanged) {
+            const updated: UserSession = {
+              ...activeSession,
+              username: data.user.username || activeSession.username,
+              displayName: data.user.displayName || activeSession.displayName,
+              pfpUrl: pfp,
+              bio: data.user.bio || activeSession.bio,
+              followerCount: data.user.followerCount ?? activeSession.followerCount,
+              followingCount: data.user.followingCount ?? activeSession.followingCount,
+            };
+            setSession(updated);
+            try {
+              localStorage.setItem('farcaster_session', JSON.stringify(updated));
+            } catch {}
+          }
         }
 
         // Fetch their casts for the active tab
@@ -656,7 +690,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       if (cleanPath === '/profile') {
         const saved = typeof window !== 'undefined' ? localStorage.getItem('farcaster_session') : null;
-        const parsedSession: UserSession | null = saved ? JSON.parse(saved) : session;
+        const parsedSession: UserSession | null = saved ? JSON.parse(saved) : (sessionRef.current || session);
         if (parsedSession?.username || parsedSession?.fid) {
           handleOpenProfile(parsedSession.username || parsedSession.fid, tabParam, updateHistory);
         } else {
@@ -691,31 +725,41 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         return;
       }
     },
-    [session, nodeUrl]
+    []
   );
+
+  const applyRouteRef = useRef(applyRoute);
+  applyRouteRef.current = applyRoute;
 
   // Listen for browser Back/Forward (popstate)
   useEffect(() => {
     const onPopState = () => {
       if (typeof window !== 'undefined') {
-        applyRoute(window.location.pathname, window.location.search, false);
+        applyRouteRef.current(window.location.pathname, window.location.search, false);
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [applyRoute]);
+  }, []);
 
-  // Initial Route Check on mount
+  // Initial Route Check on mount & when URL slug actually changes
+  const slugKey = initialSlug && initialSlug.length > 0 ? initialSlug.join('/') : '';
   useEffect(() => {
+    if (lastAppliedSlugRef.current === slugKey && initialRouteCheckedRef.current) {
+      return;
+    }
+    lastAppliedSlugRef.current = slugKey;
+    initialRouteCheckedRef.current = true;
+
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
       if (path && path !== '/') {
-        applyRoute(window.location.pathname, window.location.search, false);
-      } else if (initialSlug && initialSlug.length > 0) {
-        applyRoute('/' + initialSlug.join('/'), '', false);
+        applyRouteRef.current(window.location.pathname, window.location.search, false);
+      } else if (slugKey) {
+        applyRouteRef.current('/' + slugKey, '', false);
       }
     }
-  }, [initialSlug, applyRoute]);
+  }, [slugKey]);
 
   // 7. Search Users
   const handleSearch = async (query: string) => {
