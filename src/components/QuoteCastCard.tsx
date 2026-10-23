@@ -14,7 +14,6 @@ interface QuoteCastCardProps {
     fid: number;
     hash: string;
   };
-  nodeUrl?: string;
   onOpenThread?: (hash: string, username?: string) => void;
   onOpenProfile?: (identifier: string | number) => void;
 }
@@ -32,7 +31,6 @@ function formatTimeAgo(timestamp: number): string {
 
 export function QuoteCastCard({
   castId,
-  nodeUrl,
   onOpenThread,
   onOpenProfile,
 }: QuoteCastCardProps) {
@@ -52,7 +50,7 @@ export function QuoteCastCard({
     setLoading(true);
     setError(false);
 
-    const queryUrl = `/api/casts/${cleanHash}?fid=${castId.fid}&nodeUrl=${encodeURIComponent(nodeUrl || '')}`;
+    const queryUrl = `/api/casts/${cleanHash}?fid=${castId.fid}`;
 
     fetch(queryUrl)
       .then((res) => {
@@ -78,7 +76,7 @@ export function QuoteCastCard({
     return () => {
       active = false;
     };
-  }, [cleanHash, castId.fid, nodeUrl]);
+  }, [cleanHash, castId.fid]);
 
   // Loading Skeleton State
   if (loading) {

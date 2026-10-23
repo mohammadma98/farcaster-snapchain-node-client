@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') || '';
-    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     const results = await feedStore.searchUsers(q, nodeUrl);
 
@@ -21,7 +21,6 @@ export async function GET(request: Request) {
       query: q,
       results: mapped,
       count: mapped.length,
-      nodeUrl,
     });
   } catch (err: any) {
     return NextResponse.json(

@@ -74,6 +74,11 @@ export interface NodeHealthResult {
   error?: string;
 }
 
+export const DEFAULT_NODE_URL =
+  process.env.FARCASTER_NODE_URL ||
+  process.env.SNAPCHAIN_NODE_URL ||
+  'http://127.0.0.1:3381';
+
 export interface ReactionRecord {
   targetFid: number;
   targetHash: string;
@@ -84,12 +89,12 @@ export interface ReactionRecord {
 export class SnapchainNodeClient {
   private defaultNodeUrl: string;
 
-  constructor(nodeUrl = process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381') {
+  constructor(nodeUrl = DEFAULT_NODE_URL) {
     this.defaultNodeUrl = nodeUrl.replace(/\/$/, '');
   }
 
   /**
-   * Health check and diagnostics for any Snapchain Read Node or Hubble hub
+   * Health check and diagnostics for local Snapchain Read Node or Hubble hub
    */
   async checkHealth(nodeUrl = this.defaultNodeUrl): Promise<NodeHealthResult> {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
@@ -129,6 +134,40 @@ export class SnapchainNodeClient {
         approxSize: data.dbStats?.approxSize || 0,
       };
     } catch (err: any) {
+      // Smart Docker Bridge / Host Gateway fallback probe:
+      // If 127.0.0.1 or localhost fails with connection refused, check if host.docker.internal is reachable
+      if (
+        (cleanUrl.includes('127.0.0.1') || cleanUrl.includes('localhost')) &&
+        !cleanUrl.includes('host.docker.internal')
+      ) {
+        try {
+          const dockerHostUrl = cleanUrl
+            .replace('127.0.0.1', 'host.docker.internal')
+            .replace('localhost', 'host.docker.internal');
+          const altRes = await fetch(`${dockerHostUrl}/v1/info?dbstats=1`, {
+            signal: AbortSignal.timeout(2000),
+            headers: { Accept: 'application/json' },
+          });
+          if (altRes.ok) {
+            const data = await altRes.json();
+            this.defaultNodeUrl = dockerHostUrl;
+            return {
+              isOnline: true,
+              latencyMs: Date.now() - startTime,
+              url: dockerHostUrl,
+              version: data.version || data.hubVersion || 'Snapchain Read Node',
+              isSyncing: data.isSyncing ?? false,
+              peerCount: data.peerCount || data.numPeers || 0,
+              numMessages: data.dbStats?.numMessages || 0,
+              numFidRegistrations: data.dbStats?.numFidRegistrations || 0,
+              approxSize: data.dbStats?.approxSize || 0,
+            };
+          }
+        } catch {
+          // fallback failed, continue to standard offline error
+        }
+      }
+
       return {
         isOnline: false,
         latencyMs: Date.now() - startTime,
@@ -522,19 +561,6 @@ export class SnapchainNodeClient {
               source = 'custody';
             }
           }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    // Fallback 3: If local/custom node failed or is offline, try the Sovereign Production Node
-    const SOVEREIGN_NODE_URL = 'http://162.35.98.172:3381';
-    if (!ethAddress && cleanUrl !== SOVEREIGN_NODE_URL) {
-      try {
-        const fallbackRes = await this.getPrimaryWalletAddress(fid, SOVEREIGN_NODE_URL);
-        if (fallbackRes.ethAddress) {
-          return fallbackRes;
         }
       } catch {
         // ignore

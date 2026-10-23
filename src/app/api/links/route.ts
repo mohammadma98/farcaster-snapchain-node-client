@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     }
 
     const fid = parseInt(fidParam, 10);
-    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
+    const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     const queryType = searchParams.get('type') || searchParams.get('mode') || 'following';
     if (queryType === 'followers') {
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fid, signerPrivateKey, targetFid, type = 'follow', isRemove, nodeUrl } = body;
+    const { fid, signerPrivateKey, targetFid, type = 'follow', isRemove } = body;
 
     if (!targetFid) {
       return NextResponse.json(
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
+    const targetNodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // 1. Submit LinkAdd or LinkRemove to Snapchain node
     const nodeResult = await defaultNodeClient.publishFollow(

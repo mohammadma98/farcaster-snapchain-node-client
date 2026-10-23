@@ -29,10 +29,9 @@ export interface WalletToken {
 
 interface WalletCardProps {
   session: UserSession | null;
-  nodeUrl: string;
 }
 
-export function WalletCard({ session, nodeUrl }: WalletCardProps) {
+export function WalletCard({ session }: WalletCardProps) {
   const [tokens, setTokens] = useState<WalletToken[]>([]);
   const [totalUsd, setTotalUsd] = useState<number>(0);
   const [baseUsd, setBaseUsd] = useState<number>(0);
@@ -61,7 +60,6 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
       if (session.custodyAddress) {
         queryParams.set('fallbackAddress', session.custodyAddress);
       }
-      queryParams.set('nodeUrl', nodeUrl);
 
       const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
       const data = await res.json();
@@ -86,7 +84,7 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [session?.fid, session?.custodyAddress, nodeUrl]);
+  }, [session?.fid, session?.custodyAddress]);
 
   useEffect(() => {
     if (session?.fid) {

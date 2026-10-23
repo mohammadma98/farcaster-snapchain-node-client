@@ -43,30 +43,6 @@ import { CastMediaPreviews, FormattedCastText } from './LinkPreview';
 import { ComposeCastModal } from './ComposeCastModal';
 import { WalletCard } from './WalletCard';
 
-interface SnapchainNodePreset {
-  id: string;
-  name: string;
-  url: string;
-  badge: string;
-  isPersonal?: boolean;
-}
-
-const PRESET_NODES: SnapchainNodePreset[] = [
-  {
-    id: 'personal',
-    name: "Mohammad's Sovereign Node",
-    url: 'http://162.35.98.172:3381',
-    badge: '162.35.98.172',
-    isPersonal: true,
-  },
-  {
-    id: 'local',
-    name: 'Local Snapchain Node',
-    url: 'http://127.0.0.1:3381',
-    badge: 'localhost:3381',
-  },
-];
-
 const KNOWN_SOURCES = [
   { id: 'all', label: 'All Clients / Sources' },
   { id: 'Self-registered', label: 'Self-registered (Personal)' },
@@ -159,7 +135,7 @@ interface FarcasterClientProps {
 
 export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // Navigation / Views
-  const [activeTab, setActiveTab] = useState<'feed' | 'thread' | 'profile' | 'diagnostics'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'thread' | 'profile'>('feed');
   const [threadHash, setThreadHash] = useState<string | null>(null);
   const [profileFid, setProfileFid] = useState<number | null>(null);
   const [profileTab, setProfileTab] = useState<'casts' | 'replies' | 'quotes' | 'recasts' | 'likes'>('casts');
@@ -169,16 +145,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  // Node Connectivity
-  const [nodeUrl, setNodeUrl] = useState('http://162.35.98.172:3381');
-  const [isNodeDropdownOpen, setIsNodeDropdownOpen] = useState(false);
-  const [customNodes, setCustomNodes] = useState<Array<{ name: string; url: string }>>([]);
-  const [newCustomNodeUrl, setNewCustomNodeUrl] = useState('');
-  const [isAddingCustomNode, setIsAddingCustomNode] = useState(false);
-
   // Client Source Filter Dropdown
   const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
 
+  // Local Snapchain Node Connectivity & Health
   const [nodeHealth, setNodeHealth] = useState<{
     isOnline: boolean;
     latencyMs: number;
@@ -227,8 +197,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // Stable refs for routing and session to prevent cascade re-render loops
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const nodeUrlRef = useRef(nodeUrl);
-  nodeUrlRef.current = nodeUrl;
   const initialRouteCheckedRef = useRef(false);
   const lastAppliedSlugRef = useRef<string | null>(null);
 
@@ -274,51 +242,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const updateNodeUrl = (newUrl: string) => {
-    const clean = newUrl.trim();
-    setNodeUrl(clean);
-    try {
-      localStorage.setItem('farcaster_node_url', clean);
-    } catch {
-      // ignore
-    }
-  };
-
-  // Node switcher handlers
-  const handleSelectNode = (url: string) => {
-    updateNodeUrl(url);
-    setIsNodeDropdownOpen(false);
-    pingNode(url);
-    fetchFeed(sourceFilter, feedMode, session?.fid, undefined, url);
-    showToast(`Connected to node: ${url}`);
-  };
-
-  const handleAddCustomNode = () => {
-    if (!newCustomNodeUrl.trim()) return;
-    let url = newCustomNodeUrl.trim();
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = `http://${url}`;
-    }
-    try {
-      const parsed = new URL(url);
-      const name = `Custom (${parsed.hostname})`;
-      const updated = [...customNodes.filter((n) => n.url !== url), { name, url }];
-      setCustomNodes(updated);
-      try {
-        localStorage.setItem('farcaster_custom_nodes', JSON.stringify(updated));
-      } catch {}
-      setNewCustomNodeUrl('');
-      setIsAddingCustomNode(false);
-      handleSelectNode(url);
-    } catch {
-      showToast('Please enter a valid node URL');
-    }
-  };
-
   // Fetch accounts followed by user with localStorage caching
-  const fetchFollows = useCallback(async (fid: number, targetNode = nodeUrl) => {
+  const fetchFollows = useCallback(async (fid: number) => {
     try {
-      const res = await fetch(`/api/links?fid=${fid}&nodeUrl=${encodeURIComponent(targetNode)}`);
+      const res = await fetch(`/api/links?fid=${fid}`);
       const data = await res.json();
       if (Array.isArray(data.following) && data.following.length > 0) {
         const nextSet = new Set<number>(data.following);
@@ -339,7 +266,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     } catch {
       // ignore
     }
-  }, [nodeUrl]);
+  }, []);
 
   // 3. Fetch Feed (Following feed if logged in, Global real-time network feed if not logged in)
   const fetchFeed = useCallback(
@@ -347,8 +274,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       filter = sourceFilter,
       mode = feedMode,
       explicitViewerFid = session?.fid,
-      overrideFollowedFids?: Set<number>,
-      overrideNodeUrl?: string
+      overrideFollowedFids?: Set<number>
     ) => {
       setIsLoadingFeed(true);
       setFeedCursor(undefined);
@@ -365,8 +291,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           effectiveMode === 'following' && activeFollows.size > 0
             ? `&followedFids=${Array.from(activeFollows).join(',')}`
             : '';
-        const targetNode = overrideNodeUrl || nodeUrl;
-        const url = `/api/feed?limit=5&source=${encodeURIComponent(filter)}${viewerParam}${modeParam}${followsParam}&nodeUrl=${encodeURIComponent(targetNode)}`;
+        const url = `/api/feed?limit=5&source=${encodeURIComponent(filter)}${viewerParam}${modeParam}${followsParam}`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.casts) {
@@ -381,7 +306,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setIsLoadingFeed(false);
       }
     },
-    [nodeUrl, sourceFilter, session?.fid, feedMode, followedFids]
+    [sourceFilter, session?.fid, feedMode, followedFids]
   );
 
   // 3b. Fetch Next Batch of 5 Casts (Infinite Scroll)
@@ -395,7 +320,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           ? `&viewerFid=${session.fid}`
           : '';
       const modeParam = `&mode=${effectiveMode}`;
-      const url = `/api/feed?limit=5&cursor=${feedCursor}&source=${encodeURIComponent(sourceFilter)}${viewerParam}${modeParam}&nodeUrl=${encodeURIComponent(nodeUrl)}`;
+      const url = `/api/feed?limit=5&cursor=${feedCursor}&source=${encodeURIComponent(sourceFilter)}${viewerParam}${modeParam}`;
       const res = await fetch(url);
       const data = await res.json();
       if (Array.isArray(data.casts) && data.casts.length > 0) {
@@ -416,7 +341,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     } finally {
       setIsLoadingMoreFeed(false);
     }
-  }, [isLoadingMoreFeed, hasMoreFeed, feedCursor, session?.fid, feedMode, sourceFilter, nodeUrl]);
+  }, [isLoadingMoreFeed, hasMoreFeed, feedCursor, session?.fid, feedMode, sourceFilter]);
 
   // Infinite Scroll IntersectionObserver
   useEffect(() => {
@@ -443,17 +368,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
     try {
       const saved = localStorage.getItem('farcaster_session');
-      const savedNode = localStorage.getItem('farcaster_node_url');
-      if (savedNode) {
-        setNodeUrl(savedNode);
-      }
-
-      const savedCustom = localStorage.getItem('farcaster_custom_nodes');
-      if (savedCustom) {
-        try {
-          setCustomNodes(JSON.parse(savedCustom));
-        } catch {}
-      }
 
       if (saved) {
         const parsed: UserSession = JSON.parse(saved);
@@ -474,10 +388,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           }
         } catch {}
 
-        fetchFollows(parsed.fid, savedNode || 'http://162.35.98.172:3381');
+        fetchFollows(parsed.fid);
 
         // Refresh session profile in background
-        fetch(`/api/users/${parsed.fid}?nodeUrl=${encodeURIComponent(savedNode || 'http://162.35.98.172:3381')}`)
+        fetch(`/api/users/${parsed.fid}`)
           .then((r) => r.json())
           .then((data) => {
             if (data.user) {
@@ -514,7 +428,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       // ignore
     }
 
-    pingNode(localStorage.getItem('farcaster_node_url') || 'http://162.35.98.172:3381');
+    pingNode();
     fetchFeed(
       sourceFilter,
       initialViewerFid ? 'following' : 'global',
@@ -551,12 +465,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     fetchFeed(sourceFilter, 'global', undefined);
   };
 
-  // 2. Node Health Check
-  const pingNode = async (targetNode?: string) => {
+  // 2. Node Health Check (Local Node Backend)
+  const pingNode = async () => {
     setIsPinging(true);
     try {
-      const activeUrl = typeof targetNode === 'string' && targetNode ? targetNode : nodeUrl;
-      const res = await fetch(`/api/node/status?nodeUrl=${encodeURIComponent(activeUrl)}`);
+      const res = await fetch('/api/node/status');
       const data = await res.json();
       if (data.health) {
         setNodeHealth(data.health);
@@ -571,7 +484,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // 4. Fetch Suggested Users (Strictly balajis and mohammad98)
   const fetchSuggestedUsers = async () => {
     try {
-      const res = await fetch(`/api/users/search?q=&nodeUrl=${encodeURIComponent(nodeUrl)}`);
+      const res = await fetch('/api/users/search?q=');
       const data = await res.json();
       if (data.results && data.results.length > 0) {
         const balajiUser =
@@ -612,7 +525,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
 
     try {
-      const res = await fetch(`/api/casts/${hash}?nodeUrl=${encodeURIComponent(nodeUrl)}`);
+      const res = await fetch(`/api/casts/${hash}`);
       const data = await res.json();
       if (data.cast) {
         setCurrentThreadCast(data.cast);
@@ -629,8 +542,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // 6. Fetch Profile Tab Items (Casts, Replies, Quotes, Recasts, Likes) - 6 items per batch
   const fetchProfileCasts = async (
     fidOrUsername: number | string,
-    tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes' = 'casts',
-    targetNode = nodeUrl
+    tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes' = 'casts'
   ) => {
     setIsLoadingProfileCasts(true);
     setProfileCursor(undefined);
@@ -639,7 +551,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       const activeSession = sessionRef.current || session;
       const viewerParam = activeSession?.fid ? `&viewerFid=${activeSession.fid}` : '';
       const castsRes = await fetch(
-        `/api/users/${fidOrUsername}/casts?tab=${tab}&limit=6&nodeUrl=${encodeURIComponent(targetNode)}${viewerParam}`
+        `/api/users/${fidOrUsername}/casts?tab=${tab}&limit=6${viewerParam}`
       );
       const castsData = await castsRes.json();
       if (Array.isArray(castsData.casts)) {
@@ -669,7 +581,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       const activeSession = sessionRef.current || session;
       const viewerParam = activeSession?.fid ? `&viewerFid=${activeSession.fid}` : '';
       const fidOrUsername = currentProfile.username || currentProfile.fid;
-      const url = `/api/users/${fidOrUsername}/casts?tab=${profileTab}&limit=6&cursor=${encodeURIComponent(String(profileCursor))}&nodeUrl=${encodeURIComponent(nodeUrl)}${viewerParam}`;
+      const url = `/api/users/${fidOrUsername}/casts?tab=${profileTab}&limit=6&cursor=${encodeURIComponent(String(profileCursor))}${viewerParam}`;
       const res = await fetch(url);
       const data = await res.json();
       if (Array.isArray(data.casts) && data.casts.length > 0) {
@@ -692,7 +604,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     } finally {
       setIsLoadingMoreProfileCasts(false);
     }
-  }, [isLoadingMoreProfileCasts, hasMoreProfileCasts, profileCursor, currentProfile, profileTab, session?.fid, nodeUrl]);
+  }, [isLoadingMoreProfileCasts, hasMoreProfileCasts, profileCursor, currentProfile, profileTab, session?.fid]);
 
   // Profile Infinite Scroll IntersectionObserver
   useEffect(() => {
@@ -726,7 +638,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     setIsLoadingProfile(true);
 
     try {
-      const res = await fetch(`/api/users/${fidOrUsername}?nodeUrl=${encodeURIComponent(nodeUrl)}`);
+      const res = await fetch(`/api/users/${fidOrUsername}`);
       const data = await res.json();
       if (data.user) {
         setCurrentProfile(data.user);
@@ -773,7 +685,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         }
 
         // Fetch their casts for the active tab
-        await fetchProfileCasts(data.user.fid, tab, nodeUrl);
+        await fetchProfileCasts(data.user.fid, tab);
       }
     } catch (err) {
       console.error('Error loading profile:', err);
@@ -806,13 +718,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
-  const handleOpenDiagnostics = (updateHistory = true) => {
-    setActiveTab('diagnostics');
-    if (updateHistory && typeof window !== 'undefined') {
-      window.history.pushState({ view: 'diagnostics' }, '', '/diagnostics');
-    }
-  };
-
   const handleShareCast = (cast: FarcasterCast) => {
     const authorUname = cast.author?.username || cast.fid;
     const cleanHash = cast.hash.startsWith('0x') ? cast.hash : `0x${cast.hash}`;
@@ -837,9 +742,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       }
 
       if (cleanPath === '/diagnostics') {
-        setActiveTab('diagnostics');
-        if (updateHistory && typeof window !== 'undefined') {
-          window.history.pushState({ view: 'diagnostics' }, '', '/diagnostics');
+        setActiveTab('feed');
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({ view: 'feed' }, '', '/');
         }
         return;
       }
@@ -926,7 +831,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
     setIsSearching(true);
     try {
-      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query.trim())}&nodeUrl=${encodeURIComponent(nodeUrl)}`);
+      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query.trim())}`);
       const data = await res.json();
       if (data.results) {
         setSearchResults(data.results);
@@ -963,7 +868,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           signerPrivateKey: session.signerPrivateKey,
           text: composeText.trim(),
           embeds,
-          nodeUrl,
         }),
       });
 
@@ -1012,7 +916,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           signerPrivateKey: session.signerPrivateKey,
           text: text.trim(),
           embeds,
-          nodeUrl,
         }),
       });
 
@@ -1062,7 +965,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             fid: currentThreadCast.fid,
             hash: currentThreadCast.hash,
           },
-          nodeUrl,
         }),
       });
 
@@ -1154,7 +1056,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           targetHash: castHash,
           type,
           isRemove: wasActive,
-          nodeUrl,
         }),
       });
 
@@ -1251,7 +1152,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           targetFid,
           type: 'follow',
           isRemove: isCurrentlyFollowed,
-          nodeUrl,
         }),
       });
 
@@ -1365,169 +1265,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Snapchain Read Node Source Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setIsNodeDropdownOpen(!isNodeDropdownOpen)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-                  nodeHealth.isOnline
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100/60'
-                    : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
+            {/* Local Snapchain Network Status Pill */}
+            <div
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                nodeHealth.isOnline
+                  ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800'
+                  : 'border-slate-200 bg-slate-100 text-slate-600'
+              }`}
+              title={nodeHealth.isOnline ? `Local Node Synced (${nodeHealth.latencyMs}ms)` : 'Connecting to local node...'}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
                 }`}
-                title="Select Snapchain Read Node Source"
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                  }`}
-                />
-                <Server className="h-3.5 w-3.5 text-slate-500" />
-                <span className="hidden sm:inline font-semibold">
-                  {nodeUrl.includes('162.35.98.172')
-                    ? '162.35.98.172'
-                    : nodeUrl.includes('127.0.0.1') || nodeUrl.includes('localhost')
-                    ? 'localhost:3381'
-                    : (() => {
-                        try {
-                          return new URL(nodeUrl).host;
-                        } catch {
-                          return 'Node';
-                        }
-                      })()}
+              />
+              <span className="font-semibold text-[11px]">
+                {nodeHealth.isOnline ? 'Node Online' : 'Syncing'}
+              </span>
+              {nodeHealth.isOnline && nodeHealth.latencyMs > 0 && (
+                <span className="font-mono text-[10px] opacity-75">
+                  {nodeHealth.latencyMs}ms
                 </span>
-                <span className="font-mono text-[11px] opacity-80">
-                  {nodeHealth.isOnline ? `${nodeHealth.latencyMs}ms` : 'offline'}
-                </span>
-                <ChevronDown className="h-3 w-3 ml-0.5 opacity-60" />
-              </button>
-
-              {/* Node Switcher Menu */}
-              {isNodeDropdownOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setIsNodeDropdownOpen(false)}
-                  />
-                  <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-2 space-y-2">
-                    <div className="px-2.5 py-1.5 border-b border-slate-100 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        Snapchain Node Sources
-                      </span>
-                      <button
-                        onClick={() => pingNode()}
-                        className="text-[10px] text-purple-700 font-semibold hover:underline flex items-center gap-1"
-                      >
-                        <RefreshCw className={`h-3 w-3 ${isPinging ? 'animate-spin' : ''}`} />
-                        Ping
-                      </button>
-                    </div>
-
-                    {/* Presets */}
-                    <div className="space-y-1">
-                      {PRESET_NODES.map((preset) => {
-                        const isActive = nodeUrl === preset.url;
-                        return (
-                          <button
-                            key={preset.id}
-                            onClick={() => handleSelectNode(preset.url)}
-                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-colors ${
-                              isActive
-                                ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200'
-                                : 'hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <div className="min-w-0 pr-2">
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className={`h-2 w-2 rounded-full ${
-                                    isActive && nodeHealth.isOnline
-                                      ? 'bg-emerald-500'
-                                      : 'bg-slate-300'
-                                  }`}
-                                />
-                                <span className="font-medium truncate">{preset.name}</span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 block pl-3.5 truncate">
-                                {preset.badge}
-                              </span>
-                            </div>
-                            {isActive && <Check className="h-4 w-4 text-purple-700 shrink-0" />}
-                          </button>
-                        );
-                      })}
-
-                      {/* Custom User Nodes */}
-                      {customNodes.map((cn) => {
-                        const isActive = nodeUrl === cn.url;
-                        return (
-                          <button
-                            key={cn.url}
-                            onClick={() => handleSelectNode(cn.url)}
-                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-colors ${
-                              isActive
-                                ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200'
-                                : 'hover:bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <div className="min-w-0 pr-2">
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className={`h-2 w-2 rounded-full ${
-                                    isActive && nodeHealth.isOnline
-                                      ? 'bg-emerald-500'
-                                      : 'bg-slate-300'
-                                  }`}
-                                />
-                                <span className="font-medium truncate">{cn.name}</span>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 block pl-3.5 truncate">
-                                {cn.url}
-                              </span>
-                            </div>
-                            {isActive && <Check className="h-4 w-4 text-purple-700 shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Add Custom Node */}
-                    <div className="pt-2 border-t border-slate-100">
-                      {isAddingCustomNode ? (
-                        <div className="space-y-1.5 p-1">
-                          <input
-                            type="text"
-                            value={newCustomNodeUrl}
-                            onChange={(e) => setNewCustomNodeUrl(e.target.value)}
-                            placeholder="http://ip:3381"
-                            className="w-full text-xs font-mono px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-purple-600"
-                          />
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => setIsAddingCustomNode(false)}
-                              className="px-2 py-1 text-[11px] text-slate-500 hover:text-slate-700"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={handleAddCustomNode}
-                              className="px-2.5 py-1 text-[11px] bg-purple-700 text-white rounded-lg font-semibold hover:bg-purple-800"
-                            >
-                              Connect & Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setIsAddingCustomNode(true)}
-                          className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-xl transition-colors"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>Add Custom Node</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </>
               )}
             </div>
 
@@ -1591,18 +1349,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 >
                   <Home className="h-5 w-5" />
                   <span>Feed / Home</span>
-                </button>
-
-                <button
-                  onClick={() => handleOpenDiagnostics(true)}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                    activeTab === 'diagnostics'
-                      ? 'bg-purple-50 text-purple-700 shadow-xs'
-                      : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                  }`}
-                >
-                  <Activity className="h-5 w-5" />
-                  <span>Node Diagnostics</span>
                 </button>
 
                 {session && (
@@ -1716,25 +1462,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={() => setIsNodeDropdownOpen(true)}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
-                        title="Active Snapchain Node - Click to switch"
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                          }`}
-                        />
-                        <span className="font-semibold text-slate-800 hidden sm:inline">
-                          {nodeUrl.includes('162.35.98.172')
-                            ? '162.35.98.172'
-                            : nodeUrl.includes('127.0.0.1')
-                            ? 'localhost'
-                            : 'Custom Node'}
-                        </span>
-                        <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
-                      </button>
-                      <button
                         onClick={() => fetchFeed(sourceFilter, feedMode, session.fid)}
                         title="Refresh Feed"
                         className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors shrink-0"
@@ -1765,25 +1492,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => setIsNodeDropdownOpen(true)}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
-                        title="Active Snapchain Node - Click to switch"
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                          }`}
-                        />
-                        <span className="font-semibold text-slate-800 hidden sm:inline">
-                          {nodeUrl.includes('162.35.98.172')
-                            ? '162.35.98.172'
-                            : nodeUrl.includes('127.0.0.1')
-                            ? 'localhost'
-                            : 'Custom Node'}
-                        </span>
-                        <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
-                      </button>
                       <button
                         onClick={() => setIsAuthModalOpen(true)}
                         className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
@@ -1907,7 +1615,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                         ? followedFids.size === 0
                           ? "You are not following anyone yet. Discover and follow active builders from the 'Who to Follow' section, or switch to the Global Network Feed!"
                           : "The creators you follow have not posted recently or their posts are still syncing. Switch to the Global Network Feed to see what's happening right now."
-                        : `Connected to Snapchain Read Node at ${nodeUrl}. If your node is syncing initial blocks, posts will stream in automatically.`}
+                        : 'Connected to local Snapchain node. If your node is syncing initial blocks, posts will stream in automatically.'}
                     </p>
                     <div className="flex items-center justify-center gap-2 pt-1">
                       {feedMode === 'following' && session && (
@@ -2018,7 +1726,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                             <QuoteCastCard
                               key={idx}
                               castId={e.castId!}
-                              nodeUrl={nodeUrl}
                               onOpenThread={(h, u) => handleOpenThread(h, u, true)}
                               onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
                             />
@@ -2222,7 +1929,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           <QuoteCastCard
                             key={idx}
                             castId={e.castId!}
-                            nodeUrl={nodeUrl}
                             onOpenThread={(h, u) => handleOpenThread(h, u, true)}
                             onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
                           />
@@ -2383,7 +2089,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                 <QuoteCastCard
                                   key={idx}
                                   castId={e.castId!}
-                                  nodeUrl={nodeUrl}
                                   onOpenThread={(h, u) => handleOpenThread(h, u, true)}
                                   onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
                                 />
@@ -2675,7 +2380,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                 <QuoteCastCard
                                   key={idx}
                                   castId={e.castId!}
-                                  nodeUrl={nodeUrl}
                                   onOpenThread={(h, u) => handleOpenThread(h, u, true)}
                                   onOpenProfile={(id) => handleOpenProfile(id, 'casts', true)}
                                 />
@@ -2769,122 +2473,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                     </div>
                   </div>
                 ) : null}
-              </div>
-            )}
-
-            {/* VIEW 4: DIAGNOSTICS */}
-            {activeTab === 'diagnostics' && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-xl bg-purple-100 text-purple-700">
-                      <Activity className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900">Snapchain Node Diagnostics</h3>
-                      <p className="text-xs text-slate-500">Live metrics from your standalone read node</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => pingNode()}
-                    disabled={isPinging}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold hover:bg-slate-50 text-slate-700"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin' : ''}`} />
-                    <span>Ping</span>
-                  </button>
-                </div>
-
-                {/* Endpoint Configuration Input */}
-                <div className="p-4 rounded-2xl bg-purple-50/60 border border-purple-200/80 space-y-2.5">
-                  <label className="text-xs font-bold text-purple-950 block">
-                    Snapchain Read Node URL (:3381)
-                  </label>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      value={nodeUrl}
-                      onChange={(e) => updateNodeUrl(e.target.value)}
-                      placeholder="http://127.0.0.1:3381"
-                      className="flex-1 px-3.5 py-2 text-xs font-mono bg-white border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-slate-900"
-                    />
-                    <button
-                      onClick={() => {
-                        pingNode();
-                        fetchFeed();
-                        fetchSuggestedUsers();
-                        showToast('Connected and updated node URL');
-                      }}
-                      className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-xl transition-all shadow-xs shrink-0 flex items-center justify-center gap-1.5"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${isPinging ? 'animate-spin' : ''}`} />
-                      <span>Connect & Ping</span>
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[10px] text-purple-900/70 font-semibold">Quick Switch:</span>
-                    {PRESET_NODES.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => handleSelectNode(preset.url)}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold border transition-all ${
-                          nodeUrl === preset.url
-                            ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
-                            : 'bg-white text-purple-900 border-purple-200 hover:bg-purple-100'
-                        }`}
-                      >
-                        {preset.name}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-purple-900/70">
-                    All client reads and <code className="font-mono font-semibold">:3381/v1/submitMessage</code> writes connect directly to this node.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
-                    <span className="text-slate-400 block text-[11px]">HTTP Endpoint</span>
-                    <span className="font-mono font-bold text-slate-800 break-all">{nodeUrl}</span>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
-                    <span className="text-slate-400 block text-[11px]">Node Status</span>
-                    <span
-                      className={`font-bold inline-flex items-center gap-1.5 ${
-                        nodeHealth.isOnline ? 'text-emerald-600' : 'text-amber-600'
-                      }`}
-                    >
-                      <span
-                        className={`h-2 w-2 rounded-full ${
-                          nodeHealth.isOnline ? 'bg-emerald-500' : 'bg-amber-400'
-                        }`}
-                      />
-                      {nodeHealth.isOnline ? 'ONLINE & SYNCED' : 'OFFLINE / STANDBY'}
-                    </span>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
-                    <span className="text-slate-400 block text-[11px]">Network Latency</span>
-                    <span className="font-mono font-bold text-slate-800">
-                      {nodeHealth.isOnline ? `${nodeHealth.latencyMs} ms` : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
-                    <span className="text-slate-400 block text-[11px]">Engine Protocol</span>
-                    <span className="font-bold text-slate-800">Snapchain Engine V16</span>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-purple-100 bg-purple-50/50 p-4 text-xs space-y-2 text-purple-950">
-                  <span className="font-bold flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-purple-600" />
-                    Direct Read-Node Write Architecture
-                  </span>
-                  <p className="leading-relaxed text-purple-900/80">
-                    Snapchain read nodes accept writes at <code className="font-mono font-bold">:3381/v1/submitMessage</code>.
-                    Any message signed by your gasless Ed25519 signer is verified locally and gossiped to the validator mempool.
-                  </p>
-                </div>
               </div>
             )}
           </main>
@@ -3129,7 +2717,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             </div>
 
             {/* User Portfolio: Primary Wallet (Base & Ethereum) */}
-            <WalletCard session={session} nodeUrl={nodeUrl} />
+            <WalletCard session={session} />
           </aside>
         </div>
       </div>
@@ -3146,7 +2734,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
               <X className="h-4 w-4" />
             </button>
             <LoginPage
-              nodeUrl={nodeUrl}
               onLoginSuccess={handleLoginSuccess}
               onCancel={() => setIsAuthModalOpen(false)}
             />
@@ -3176,7 +2763,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         onPublish={handleModalPublishCast}
         quoteCast={quoteCast}
         onClearQuote={() => setQuoteCast(null)}
-        defaultNodeUrl={nodeUrl}
       />
     </div>
   );

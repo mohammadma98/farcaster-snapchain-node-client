@@ -10,9 +10,9 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { mnemonic, nodeUrl, signerPrivateKey, fid } = body;
+    const { mnemonic, signerPrivateKey, fid } = body;
 
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const targetNodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // Option A: Direct login with an already active / approved Ed25519 signer private key
     if (!mnemonic?.trim() && signerPrivateKey?.trim() && fid) {

@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fid, signerPrivateKey, targetFid, targetHash, type, isRemove, nodeUrl } = body;
+    const { fid, signerPrivateKey, targetFid, targetHash, type, isRemove } = body;
 
     if (!targetHash || !type) {
       return NextResponse.json(
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const targetNodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // 1. Submit to Snapchain node mempool
     const nodeResult = await defaultNodeClient.publishReaction(

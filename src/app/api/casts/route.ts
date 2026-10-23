@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fid, signerPrivateKey, text, parentCastId, embeds, nodeUrl } = body;
+    const { fid, signerPrivateKey, text, parentCastId, embeds } = body;
 
     if (!fid || !signerPrivateKey || !text?.trim()) {
       return NextResponse.json(
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const targetNodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     // 1. Submit to Snapchain Read Node mempool
     const nodeResult = await defaultNodeClient.publishCast(

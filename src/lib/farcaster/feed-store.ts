@@ -48,7 +48,7 @@ class FeedStore {
       }
 
       // Query local Snapchain node with public fallback
-      const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
+      const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
       try {
         const profile = await defaultNodeClient.getUserProfile(fidNum, targetUrl);
         if (profile.username && !profile.username.startsWith('user_')) {
@@ -87,7 +87,7 @@ class FeedStore {
     }
 
     // Resolve username on the local Snapchain node
-    const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
+    const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
     try {
       const proof = await defaultNodeClient.lookupUsername(cleanUsername, targetUrl);
       if (proof && proof.fid) {

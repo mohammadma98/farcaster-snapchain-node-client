@@ -95,7 +95,7 @@ export async function GET(request: Request) {
   let address = searchParams.get('address')?.trim();
   const fidParam = searchParams.get('fid');
   const fallbackAddress = searchParams.get('fallbackAddress')?.trim();
-  const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
+  const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
   let addressSource: 'provided' | 'primary' | 'verification' | 'custody' | 'fallback' | null = address ? 'provided' : null;
 

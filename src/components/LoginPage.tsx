@@ -15,10 +15,9 @@ import { UserSession } from '@/lib/farcaster/types';
 interface LoginPageProps {
   onLoginSuccess: (session: UserSession) => void;
   onCancel?: () => void;
-  nodeUrl: string;
 }
 
-export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps) {
+export function LoginPage({ onLoginSuccess, onCancel }: LoginPageProps) {
   const [mnemonic, setMnemonic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +61,6 @@ export function LoginPage({ onLoginSuccess, onCancel, nodeUrl }: LoginPageProps)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mnemonic: mnemonic.trim(),
-          nodeUrl,
         }),
       });
 

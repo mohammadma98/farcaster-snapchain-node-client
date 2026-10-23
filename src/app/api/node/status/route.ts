@@ -3,29 +3,33 @@ import { defaultNodeClient } from '@/lib/farcaster/node-client';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
-
+export async function GET() {
   try {
-    const health = await defaultNodeClient.checkHealth(nodeUrl);
+    const health = await defaultNodeClient.checkHealth();
     return NextResponse.json({
       status: 'ok',
-      health,
-      nodeUrl,
+      health: {
+        isOnline: health.isOnline,
+        latencyMs: health.latencyMs,
+        version: health.version,
+        isSyncing: health.isSyncing,
+        peerCount: health.peerCount,
+        numMessages: health.numMessages,
+        error: health.error,
+      },
       timestamp: Date.now(),
     });
   } catch (err: any) {
     return NextResponse.json(
       {
         status: 'error',
-        error: err.message || 'Failed to ping node',
+        error: err.message || 'Failed to ping internal node',
         health: {
           isOnline: false,
           latencyMs: 0,
-          url: nodeUrl,
           error: err.message,
         },
+        timestamp: Date.now(),
       },
       { status: 200 }
     );

@@ -39,7 +39,6 @@ interface ComposeCastModalProps {
   ) => Promise<boolean>;
   quoteCast?: FarcasterCast | null;
   onClearQuote?: () => void;
-  defaultNodeUrl?: string;
 }
 
 const MAX_IMAGES = 3;
@@ -53,7 +52,6 @@ export function ComposeCastModal({
   onPublish,
   quoteCast,
   onClearQuote,
-  defaultNodeUrl,
 }: ComposeCastModalProps) {
   const [text, setText] = useState('');
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);

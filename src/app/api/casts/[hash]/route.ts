@@ -17,8 +17,7 @@ export async function GET(
     const fid = fidParam ? parseInt(fidParam, 10) : undefined;
     const viewerFidParam = searchParams.get('viewerFid');
     const viewerFid = viewerFidParam ? parseInt(viewerFidParam, 10) : undefined;
-    const nodeUrl =
-      searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     const hasDb = await isPostgresAvailable();
 

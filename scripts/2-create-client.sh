@@ -176,6 +176,9 @@ if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
     PG_NET_ARGS="-p 5432:5432"
     PG_HOST="host.docker.internal"
     WORKER_NET_ARGS="--add-host=host.docker.internal:host-gateway"
+    if [ "$READ_NODE_URL" == "http://localhost:3381" ] || [ "$READ_NODE_URL" == "http://127.0.0.1:3381" ]; then
+        READ_NODE_URL="http://host.docker.internal:3381"
+    fi
 fi
 
 if ! $DOCKER_BIN ps --format '{{.Names}}' 2>/dev/null | grep -q '^farcaster-postgres$'; then

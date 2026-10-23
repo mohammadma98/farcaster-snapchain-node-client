@@ -39,7 +39,7 @@ export async function GET(
     const cursorParam = searchParams.get('cursor');
     const cursorTimestamp = cursorParam ? parseInt(cursorParam, 10) : undefined;
     const tab = searchParams.get('tab') || 'casts'; // 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes'
-    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     const user = await feedStore.getUser(id, nodeUrl);
     if (!user) {
