@@ -204,6 +204,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FarcasterUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 
   // Suggested Follows (balajis first, mohammad98 second)
   const [suggestedUsers, setSuggestedUsers] = useState<FarcasterUser[]>(DEFAULT_SUGGESTED_USERS);
@@ -1265,6 +1266,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Mobile Search Toggle */}
+            <button
+              onClick={() => setIsMobileSearchOpen((prev) => !prev)}
+              title="Search users"
+              className="lg:hidden p-1.5 text-slate-600 hover:text-purple-700 hover:bg-slate-100 rounded-xl transition-all"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+
+            {/* Mobile Node Status Dot */}
+            <div
+              className="sm:hidden flex items-center justify-center h-7 w-7 rounded-full bg-slate-100 border border-slate-200"
+              title={nodeHealth.isOnline ? `Node Online (${nodeHealth.latencyMs}ms)` : 'Node Syncing'}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+            </div>
+
             {/* Local Snapchain Network Status Pill */}
             <div
               className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
@@ -1328,11 +1350,146 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         </div>
       </div>
 
+      {/* Mobile Search Dropdown */}
+      {isMobileSearchOpen && (
+        <div className="lg:hidden bg-white border-b border-slate-200 p-3 shadow-md animate-in slide-in-from-top-2 duration-200">
+          <div className="relative">
+            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-3" />
+            <input
+              type="text"
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search user proof (@username or FID)..."
+              className="w-full pl-9 pr-8 py-2 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all"
+            />
+            {isSearching && (
+              <RefreshCw className="h-3.5 w-3.5 text-purple-600 animate-spin absolute right-3 top-2.5" />
+            )}
+          </div>
+
+          {/* Mobile Search Results */}
+          {searchResults.length > 0 && (
+            <div className="mt-2 max-h-60 overflow-y-auto space-y-1">
+              {searchResults.map((u) => (
+                <div
+                  key={u.fid}
+                  onClick={() => {
+                    handleOpenProfile(u.username || u.fid, 'casts', true);
+                    setIsMobileSearchOpen(false);
+                  }}
+                  className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <FarcasterAvatar
+                      src={u.pfpUrl}
+                      alt={u.username}
+                      fid={u.fid}
+                      username={u.username}
+                      className="h-7 w-7 rounded-full object-cover shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <span className="font-semibold text-xs text-slate-900 block truncate">
+                        {u.displayName || `@${u.username}`}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block truncate">@{u.username} • FID {u.fid}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFollow(u.fid);
+                    }}
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 ${
+                      followedFids.has(u.fid)
+                        ? 'bg-slate-100 text-slate-600'
+                        : 'bg-purple-700 text-white'
+                    }`}
+                  >
+                    {followedFids.has(u.fid) ? 'Following' : 'Follow'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* RESPONSIVE TOP FEED MODE SWITCHER (Following / Global) */}
+      {activeTab === 'feed' && (
+        <div className="sticky top-14 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex items-center justify-between">
+              {/* Following & Global Tabs */}
+              <div className="flex items-center">
+                <button
+                  onClick={() => {
+                    if (!session) {
+                      setIsAuthModalOpen(true);
+                      return;
+                    }
+                    setFeedMode('following');
+                    fetchFeed(sourceFilter, 'following', session.fid);
+                  }}
+                  className={`relative py-3 px-4 text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 sm:gap-2 ${
+                    feedMode === 'following'
+                      ? 'text-purple-700'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <UserCheck className="h-4 w-4" />
+                  <span>Following</span>
+                  {session && followedFids.size > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-extrabold">
+                      {followedFids.size}
+                    </span>
+                  )}
+                  {feedMode === 'following' && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-700 rounded-full" />
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setFeedMode('global');
+                    fetchFeed(sourceFilter, 'global', session?.fid);
+                  }}
+                  className={`relative py-3 px-4 text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 sm:gap-2 ${
+                    feedMode === 'global'
+                      ? 'text-purple-700'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  <span>Global</span>
+                  {feedMode === 'global' && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-700 rounded-full" />
+                  )}
+                </button>
+              </div>
+
+              {/* Refresh Button */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => fetchFeed(sourceFilter, feedMode, session?.fid)}
+                  title="Refresh Feed"
+                  className="p-1.5 sm:p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Container: 3 Columns */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-4 py-4 sm:py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* LEFT SIDEBAR (Desktop & Mobile) */}
-          <aside className="lg:col-span-3 space-y-4 lg:sticky lg:top-20 self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto pr-0.5">
+          {/* LEFT SIDEBAR (Desktop Only) */}
+          <aside className="hidden lg:block lg:col-span-3 space-y-4 lg:sticky lg:top-28 self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto pr-0.5">
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-2">
               {/* Navigation Items */}
               <nav className="space-y-1">
@@ -1425,98 +1582,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </aside>
 
           {/* CENTER COLUMN (Main Feed / Thread / Profile) */}
-          <main className="lg:col-span-6 space-y-4">
+          <main className="col-span-1 lg:col-span-6 space-y-4 pb-24 lg:pb-8">
             {/* VIEW 1: HOME FEED */}
             {activeTab === 'feed' && (
               <div className="space-y-4">
-                {/* Feed Mode Switcher Header */}
-                {session ? (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-xs flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <button
-                        onClick={() => {
-                          setFeedMode('following');
-                          fetchFeed(sourceFilter, 'following', session.fid);
-                        }}
-                        className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                          feedMode === 'following'
-                            ? 'bg-purple-700 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
-                      >
-                        <UserCheck className="h-3.5 w-3.5" />
-                        <span>Following ({followedFids.size})</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setFeedMode('global');
-                          fetchFeed(sourceFilter, 'global', session.fid);
-                        }}
-                        className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                          feedMode === 'global'
-                            ? 'bg-purple-700 text-white shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
-                      >
-                        <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                        <span>Global Network</span>
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => fetchFeed(sourceFilter, feedMode, session.fid)}
-                        title="Refresh Feed"
-                        className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors shrink-0"
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-xs text-slate-900 uppercase tracking-wider">
-                            Latest Network Casts
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
-                            Live Stream
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 truncate">
-                          Real-time global posts across the decentralized Farcaster network
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => setIsAuthModalOpen(true)}
-                        className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
-                      >
-                        <Key className="h-3.5 w-3.5" />
-                        <span>Log In for Following Feed</span>
-                      </button>
-                      <button
-                        onClick={() => fetchFeed(sourceFilter, 'global', undefined)}
-                        title="Refresh Global Feed"
-                        className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors"
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-
-
                 {/* Casts Stream */}
                 {isLoadingFeed ? (
                   <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
@@ -2137,6 +2206,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                       </div>
                     </div>
 
+                    {/* Mobile Wallet Card (shown on mobile when viewing own profile) */}
+                    {session && currentProfile.fid === session.fid && (
+                      <div className="lg:hidden">
+                        <WalletCard session={session} onOpenAuthModal={() => setIsAuthModalOpen(true)} />
+                      </div>
+                    )}
+
                     {/* Profile Navigation Tabs (like farcaster.xyz) */}
                     <div className="bg-white rounded-2xl border border-slate-200 p-1.5 shadow-xs flex items-center gap-1 overflow-x-auto scrollbar-none">
                       {[
@@ -2408,8 +2484,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             )}
           </main>
 
-          {/* RIGHT SIDEBAR (Search, Node Status, Suggested Follows) */}
-          <aside className="lg:col-span-3 space-y-4 lg:sticky lg:top-20 self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto pr-0.5">
+          {/* RIGHT SIDEBAR (Desktop Only: Search, Node Status, Suggested Follows) */}
+          <aside className="hidden lg:block lg:col-span-3 space-y-4 lg:sticky lg:top-28 self-start lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto pr-0.5">
             {/* Search Box Widget */}
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
               <div className="relative">
@@ -2652,7 +2728,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       {/* Login Modal (Responsive & Scrollable for all screen heights) */}
       {isAuthModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm overflow-y-auto p-3 sm:p-6 flex min-h-full items-center justify-center">
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm overflow-y-auto p-3 sm:p-6 flex min-h-full items-center justify-center">
           <div className="relative w-full max-w-lg my-auto py-2">
             <button
               onClick={() => setIsAuthModalOpen(false)}
@@ -2669,19 +2745,81 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         </div>
       )}
 
-      {/* Mobile Floating Action Button (New Cast) */}
-      {session && (
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200/90 shadow-[0_-4px_25px_rgba(0,0,0,0.06)] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 px-6 flex items-center justify-between lg:hidden select-none">
+        {/* 1. Left: Home (Feed) */}
         <button
           onClick={() => {
-            setQuoteCast(null);
-            setIsComposeModalOpen(true);
+            if (activeTab === 'feed') {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+              fetchFeed(sourceFilter, feedMode, session?.fid);
+            } else {
+              handleBackToFeed(true);
+            }
           }}
-          className="sm:hidden fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-purple-700 hover:bg-purple-800 text-white shadow-xl shadow-purple-700/30 flex items-center justify-center transition-transform active:scale-95"
-          title="New Cast"
+          className={`flex flex-col items-center justify-center gap-1 min-w-[64px] py-1 transition-all ${
+            activeTab === 'feed'
+              ? 'text-purple-700 font-bold'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
         >
-          <Send className="h-5 w-5" />
+          <Home className={`h-5 w-5 ${activeTab === 'feed' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          <span className="text-[10px] tracking-tight">Home</span>
         </button>
-      )}
+
+        {/* 2. Center: Compose FAB */}
+        <button
+          onClick={() => {
+            if (session) {
+              setQuoteCast(null);
+              setIsComposeModalOpen(true);
+            } else {
+              setIsAuthModalOpen(true);
+            }
+          }}
+          title="Create Cast"
+          className="-mt-6 h-12 w-12 rounded-full bg-gradient-to-tr from-purple-700 to-indigo-600 hover:from-purple-800 hover:to-indigo-700 text-white shadow-lg shadow-purple-600/35 border-4 border-white flex items-center justify-center transition-transform active:scale-90"
+        >
+          <Plus className="h-6 w-6 stroke-[2.5]" />
+        </button>
+
+        {/* 3. Right: Profile */}
+        <button
+          onClick={() => {
+            if (session) {
+              handleOpenProfile(session.username || session.fid, 'casts', true);
+            } else {
+              setIsAuthModalOpen(true);
+            }
+          }}
+          className={`flex flex-col items-center justify-center gap-1 min-w-[64px] py-1 transition-all ${
+            activeTab === 'profile' && profileFid === session?.fid
+              ? 'text-purple-700 font-bold'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          {session ? (
+            <div
+              className={`p-0.5 rounded-full border-2 transition-all ${
+                activeTab === 'profile' && profileFid === session?.fid
+                  ? 'border-purple-700'
+                  : 'border-transparent'
+              }`}
+            >
+              <FarcasterAvatar
+                src={session.pfpUrl}
+                alt={session.username}
+                fid={session.fid}
+                username={session.username}
+                className="h-5 w-5 rounded-full object-cover"
+              />
+            </div>
+          ) : (
+            <User className={`h-5 w-5 ${activeTab === 'profile' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          )}
+          <span className="text-[10px] tracking-tight">Profile</span>
+        </button>
+      </nav>
 
       {/* Professional Compose Cast Modal (Multi-Image Catbox Support) */}
       <ComposeCastModal
