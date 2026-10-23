@@ -1515,79 +1515,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   </div>
                 )}
 
-                {/* Inline Cast Composer (Only for Logged-In Users) */}
-                {session && (
-                  <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
-                    <div className="flex gap-3">
-                      <FarcasterAvatar
-                        src={session?.pfpUrl}
-                        alt={session?.username || 'You'}
-                        fid={session?.fid}
-                        username={session?.username}
-                        className="h-10 w-10 rounded-full object-cover border border-purple-200 shrink-0"
-                      />
-                      <div className="flex-1 space-y-2">
-                        <textarea
-                          id="composer-textarea"
-                          value={composeText}
-                          onChange={(e) => setComposeText(e.target.value)}
-                          placeholder={`What's happening on Farcaster, @${session.username}?`}
-                          rows={3}
-                          maxLength={320}
-                          className="w-full text-sm text-slate-900 placeholder:text-slate-400 border-none outline-none resize-none bg-transparent"
-                        />
 
-                        {/* Quoted Cast Preview Box */}
-                        {quoteCast && (
-                          <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 relative text-xs space-y-1">
-                            <button
-                              onClick={() => setQuoteCast(null)}
-                              className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 p-0.5"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
-                              <Quote className="h-3 w-3 text-purple-600" />
-                              <span>Quoting @{quoteCast.author?.username || quoteCast.fid}</span>
-                            </div>
-                            <p className="text-slate-700 line-clamp-2">{quoteCast.text}</p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setIsComposeModalOpen(true)}
-                              className="flex items-center gap-1.5 text-slate-500 hover:text-purple-700 hover:bg-purple-50 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors"
-                              title="Attach images (up to 3)"
-                            >
-                              <ImageIcon className="h-4 w-4 text-purple-600" />
-                              <span>Image</span>
-                            </button>
-
-                            <span
-                              className={`text-[11px] font-mono ${
-                                composeText.length > 300 ? 'text-amber-600 font-bold' : 'text-slate-400'
-                              }`}
-                            >
-                              {composeText.length}/320
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={handlePublishCast}
-                            disabled={isPublishing || !composeText.trim()}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
-                          >
-                            <Send className="h-3 w-3" />
-                            <span>{isPublishing ? 'Publishing...' : 'Cast'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {/* Casts Stream */}
                 {isLoadingFeed ? (
@@ -2481,7 +2409,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </main>
 
           {/* RIGHT SIDEBAR (Search, Node Status, Suggested Follows) */}
-          <aside className="lg:col-span-3 space-y-4">
+          <aside className="lg:col-span-3 space-y-4 lg:sticky lg:top-20 self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto pr-0.5">
             {/* Search Box Widget */}
             <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
               <div className="relative">
