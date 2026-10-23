@@ -165,11 +165,16 @@ echo -e "\n  ${GREEN}✓ Client Docker image successfully built: farcaster-clien
 # 4.5 Ensure Sovereign PostgreSQL Indexer Database (512MB RAM cap, Zero-Config)
 # ------------------------------------------------------------------------------
 echo -e "\n${CYAN}${BOLD}Ensuring Sovereign PostgreSQL Indexer Container (512MB RAM cap)...${NC}"
+NET_ARGS="--network host"
 PG_NET_ARGS="--network host"
 PG_HOST="127.0.0.1"
+WORKER_NET_ARGS="--network host"
+
 if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
+    NET_ARGS="-p 3000:3000 --add-host=host.docker.internal:host-gateway"
     PG_NET_ARGS="-p 5432:5432"
     PG_HOST="host.docker.internal"
+    WORKER_NET_ARGS="--add-host=host.docker.internal:host-gateway"
 fi
 
 if ! $DOCKER_BIN ps --format '{{.Names}}' 2>/dev/null | grep -q '^farcaster-postgres$'; then
@@ -198,7 +203,7 @@ $DOCKER_BIN rm -f farcaster-feed-worker > /dev/null 2>&1 || true
 $DOCKER_BIN run -d \
     --name farcaster-feed-worker \
     --restart unless-stopped \
-    $NET_ARGS \
+    $WORKER_NET_ARGS \
     -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
     -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
     -e MAX_FEED_CASTS="1000" \
@@ -211,18 +216,12 @@ echo -e "  ${GREEN}✓ Feed Indexer Worker is running (Live Event Stream, max 10
 if [ "$CLIENT_TYPE" == "cli" ]; then
     echo -e "\n${GREEN}${BOLD}Launching Farcaster Interactive CLI inside Docker Container...${NC}\n"
     $DOCKER_BIN run --rm -it \
-        --network host \
+        $NET_ARGS \
         -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
         -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
         farcaster-client npm run cli
 else
     echo -e "\n${CYAN}${BOLD}Starting Sovereign Farcaster Web Client container (port 3000)...${NC}"
-
-    # Determine container network configuration
-    NET_ARGS="--network host"
-    if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
-        NET_ARGS="-p 3000:3000 --add-host=host.docker.internal:host-gateway"
-    fi
 
     $DOCKER_BIN run -d \
         --name farcaster-client \
