@@ -41,6 +41,7 @@ import { FarcasterAvatar } from './FarcasterAvatar';
 import { QuoteCastCard } from './QuoteCastCard';
 import { CastMediaPreviews, FormattedCastText } from './LinkPreview';
 import { ComposeCastModal } from './ComposeCastModal';
+import { WalletCard } from './WalletCard';
 
 interface SnapchainNodePreset {
   id: string;
@@ -3126,6 +3127,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 MIT License • mohammadma98
               </div>
             </div>
+
+            {/* User Portfolio: Primary Wallet (Base & Ethereum) */}
+            <WalletCard session={session} nodeUrl={nodeUrl} />
           </aside>
         </div>
       </div>

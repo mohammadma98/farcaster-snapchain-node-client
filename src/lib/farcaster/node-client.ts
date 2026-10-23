@@ -430,6 +430,108 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Extract primary wallet address (Ethereum & Solana) directly from the Farcaster protocol:
+   * 1. Protocol user data: USER_DATA_PRIMARY_ADDRESS_ETHEREUM (type 11) & USER_DATA_PRIMARY_ADDRESS_SOLANA (type 12)
+   * 2. Fallback: First verified Ethereum address in verificationsByFid
+   * 3. Fallback: On-chain custody address from onChainEventsByFid (EVENT_TYPE_ID_REGISTER)
+   */
+  async getPrimaryWalletAddress(
+    fid: number,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<{
+    ethAddress: string | null;
+    solAddress: string | null;
+    source: 'primary' | 'verification' | 'custody' | null;
+  }> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    let ethAddress: string | null = null;
+    let solAddress: string | null = null;
+    let source: 'primary' | 'verification' | 'custody' | null = null;
+
+    try {
+      const userRes = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (userRes.ok) {
+        const data = await userRes.json();
+        const messages = data.messages || [];
+        for (const msg of messages) {
+          const body = msg.data?.userDataBody || msg.data?.user_data_body;
+          if (!body) continue;
+          const typeStr = String(body.type || '').toUpperCase();
+          if (typeStr === '11' || typeStr === 'USER_DATA_PRIMARY_ADDRESS_ETHEREUM') {
+            if (body.value && typeof body.value === 'string' && body.value.startsWith('0x')) {
+              ethAddress = body.value;
+              source = 'primary';
+            }
+          } else if (typeStr === '12' || typeStr === 'USER_DATA_PRIMARY_ADDRESS_SOLANA') {
+            if (body.value) {
+              solAddress = body.value;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fallback 1: First verified Ethereum address
+    if (!ethAddress) {
+      try {
+        const verifRes = await fetch(`${cleanUrl}/v1/verificationsByFid?fid=${fid}`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (verifRes.ok) {
+          const data = await verifRes.json();
+          const messages = data.messages || [];
+          for (const msg of messages) {
+            const body = msg.data?.verificationAddAddressBody || msg.data?.verification_add_address_body;
+            if (body) {
+              const proto = String(body.protocol || '').toUpperCase();
+              if (proto === '0' || proto === 'PROTOCOL_ETHEREUM' || proto === 'ETHEREUM') {
+                if (body.address && typeof body.address === 'string' && body.address.startsWith('0x')) {
+                  ethAddress = body.address;
+                  source = 'verification';
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Fallback 2: On-chain custody address from IdRegistry
+    if (!ethAddress) {
+      try {
+        const onChainRes = await fetch(`${cleanUrl}/v1/onChainEventsByFid?fid=${fid}&event_type=2`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (onChainRes.ok) {
+          const data = await onChainRes.json();
+          const events = data.events || [];
+          if (events.length > 0) {
+            const cust = events[0]?.idRegisterEventBody?.to;
+            if (cust && typeof cust === 'string' && cust.startsWith('0x')) {
+              ethAddress = cust;
+              source = 'custody';
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return { ethAddress, solAddress, source };
+  }
+
+  /**
    * Fetch casts published by an FID directly from the local node,
    * with decentralized fallback to network directory if node returns 0 casts.
    */
