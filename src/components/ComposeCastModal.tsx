@@ -111,7 +111,7 @@ export function ComposeCastModal({
             ? {
                 ...item,
                 status: 'error',
-                error: err.message || 'خطا در آپلود عکس به سرور Catbox',
+                error: err.message || 'Failed to upload image to storage.',
               }
             : item
         )
@@ -131,14 +131,14 @@ export function ComposeCastModal({
 
       const remainingSlots = MAX_IMAGES - attachedImages.length;
       if (remainingSlots <= 0) {
-        setErrorMessage(`حداکثر ${MAX_IMAGES} تصویر در هر کست مجاز است.`);
+        setErrorMessage(`Maximum ${MAX_IMAGES} images allowed per cast.`);
         return;
       }
 
       const filesToAdd = incoming.slice(0, remainingSlots);
       if (incoming.length > remainingSlots) {
         setErrorMessage(
-          `فقط ${remainingSlots} تصویر دیگر اضافه شد (سقف مجاز: ${MAX_IMAGES} عکس).`
+          `Added ${remainingSlots} image(s) (maximum ${MAX_IMAGES} images allowed).`
         );
       }
 
@@ -146,7 +146,7 @@ export function ComposeCastModal({
 
       for (const file of filesToAdd) {
         if (file.size > MAX_IMAGE_BYTES) {
-          setErrorMessage(`حجم تصویر "${file.name}" بیشتر از ۱۰ مگابایت است.`);
+          setErrorMessage(`Image "${file.name}" exceeds 10 MB limit.`);
           continue;
         }
 
@@ -277,7 +277,7 @@ export function ComposeCastModal({
         onClose();
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'خطا در ثبت کست روی نود اسنپ‌چین.');
+      setErrorMessage(err.message || 'Failed to submit cast to Snapchain node.');
     } finally {
       setIsPublishing(false);
     }
@@ -409,7 +409,7 @@ export function ComposeCastModal({
                   {img.status === 'uploading' && (
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs flex flex-col items-center justify-center text-white gap-1 p-2">
                       <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
-                      <span className="text-[10px] font-medium">Catbox...</span>
+                      <span className="text-[10px] font-medium">Uploading...</span>
                     </div>
                   )}
 
@@ -418,7 +418,7 @@ export function ComposeCastModal({
                     <div className="absolute inset-0 bg-red-950/70 backdrop-blur-xs flex flex-col items-center justify-center text-white gap-1.5 p-2 text-center">
                       <AlertCircle className="h-5 w-5 text-red-400" />
                       <span className="text-[10px] text-red-200 line-clamp-2">
-                        {img.error || 'خطا در آپلود'}
+                        {img.error || 'Upload error'}
                       </span>
                       <button
                         type="button"
@@ -426,7 +426,7 @@ export function ComposeCastModal({
                         className="flex items-center gap-1 text-[10px] bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-md font-semibold transition-colors"
                       >
                         <RefreshCw className="h-2.5 w-2.5" />
-                        <span>تلاش مجدد</span>
+                        <span>Retry</span>
                       </button>
                     </div>
                   )}
@@ -436,7 +436,7 @@ export function ComposeCastModal({
                     type="button"
                     onClick={() => handleRemoveImage(img.id)}
                     className="absolute top-1.5 right-1.5 h-6 w-6 rounded-full bg-slate-900/75 hover:bg-slate-900 text-white flex items-center justify-center transition-opacity opacity-90 hover:opacity-100 shadow-md"
-                    title="حذف تصویر"
+                    title="Remove image"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -465,7 +465,7 @@ export function ComposeCastModal({
                     type="button"
                     onClick={onClearQuote}
                     className="h-5 w-5 rounded-full flex items-center justify-center text-purple-400 hover:text-purple-700 hover:bg-purple-100 transition-colors"
-                    title="حذف کوت"
+                    title="Remove quote"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -512,19 +512,19 @@ export function ComposeCastModal({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:border-purple-300 hover:bg-purple-50/50 text-slate-700 hover:text-purple-700 text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               title={
                 attachedImages.length >= MAX_IMAGES
-                  ? 'سقف ۳ تصویر تکمیل شده است'
-                  : 'افزودن تصویر (Catbox رایگان)'
+                  ? 'Maximum 3 images reached'
+                  : 'Attach images (up to 3)'
               }
             >
               <ImageIcon className="h-4 w-4 text-purple-600" />
-              <span>عکس</span>
+              <span>Image</span>
               <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded-md">
                 {attachedImages.length}/{MAX_IMAGES}
               </span>
             </button>
 
             <span className="text-[11px] text-slate-400 hidden sm:inline">
-              یا تصویر را Drag & Drop کنید
+              or drag & drop images
             </span>
           </div>
 
@@ -554,17 +554,17 @@ export function ComposeCastModal({
               {isPublishing ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>در حال ارسال...</span>
+                  <span>Publishing...</span>
                 </>
               ) : isAnyUploading ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>آپلود مدیا...</span>
+                  <span>Uploading...</span>
                 </>
               ) : (
                 <>
                   <Send className="h-3.5 w-3.5" />
-                  <span>ارسال کست</span>
+                  <span>Cast</span>
                 </>
               )}
             </button>

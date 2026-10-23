@@ -1327,13 +1327,13 @@ export class SnapchainNodeClient {
     const errText = attempt.text.toLowerCase();
 
     if (attempt.status === 0) {
-      userFriendlyError = `عدم امکان برقراری ارتباط با نود داخلی (${cleanUrl}): اتصال برقرار نشد یا زمان پاسخ منقضی شد. (${attempt.text})`;
+      userFriendlyError = `Unable to connect to internal node (${cleanUrl}): Connection failed or timed out. (${attempt.text})`;
     } else if (errText.includes('invalid signer') || errText.includes('validation_failure')) {
-      userFriendlyError = `خطای اعتبارسنجی در نود داخلی: احتمالاً نود از شبکه عقب است یا رویداد ثبت کلید ساینر را پردازش نکرده است (${attempt.text})`;
+      userFriendlyError = `Signer validation failure: Node may be syncing or has not processed key registration event (${attempt.text})`;
     } else if (attempt.status === 502 || attempt.status === 503) {
-      userFriendlyError = `نود داخلی موقتاً در دسترس نیست (HTTP ${attempt.status}). نود ممکن است در حال همگام‌سازی یا لود بلاک‌ها باشد.`;
+      userFriendlyError = `Node temporarily unavailable (HTTP ${attempt.status}). Node may be synchronizing blocks.`;
     } else {
-      userFriendlyError = `نود داخلی ارسال پیام را رد کرد (${attempt.status}): ${attempt.text}`;
+      userFriendlyError = `Node rejected submission (${attempt.status}): ${attempt.text}`;
     }
 
     return {

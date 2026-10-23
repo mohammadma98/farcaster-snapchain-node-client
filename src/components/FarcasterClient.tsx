@@ -974,16 +974,16 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       setComposeText('');
       setQuoteCast(null);
-      showToast('پیام در مم‌پول نود ثبت شد؛ پس از تایید در بلاک اسنپ‌چین و ایندکس توسط ورکر در فید نمایش داده می‌شود.');
+      showToast('Cast submitted to node mempool. It will appear in feed once confirmed.');
 
       // Trigger feed refresh after 3.5s so the event indexed into PostgreSQL by the FeedWorker becomes visible
       setTimeout(() => {
         fetchFeed(sourceFilter, feedMode, session.fid);
       }, 3500);
     } catch (err: any) {
-      const msg = err.message || 'خطا در ارسال کست به نود';
+      const msg = err.message || 'Failed to publish cast to node';
       showToast(msg);
-      if (msg.includes('invalid signer') && !msg.includes('عقب') && !msg.includes('lagging')) {
+      if (msg.includes('invalid signer') && !msg.includes('lagging')) {
         setIsAuthModalOpen(true);
       }
     } finally {
@@ -1022,7 +1022,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       }
 
       setQuoteCast(null);
-      showToast('پیام در مم‌پول نود ثبت شد؛ پس از تایید در بلاک اسنپ‌چین در فید نمایش داده می‌شود.');
+      showToast('Cast submitted to node mempool. It will appear in feed once confirmed.');
 
       // Trigger feed refresh after 3.5s so the event indexed into PostgreSQL by the FeedWorker becomes visible
       setTimeout(() => {
@@ -1031,9 +1031,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       return true;
     } catch (err: any) {
-      const msg = err.message || 'خطا در ارسال کست به نود';
+      const msg = err.message || 'Failed to publish cast to node';
       showToast(msg);
-      if (msg.includes('invalid signer') && !msg.includes('عقب') && !msg.includes('lagging')) {
+      if (msg.includes('invalid signer') && !msg.includes('lagging')) {
         setIsAuthModalOpen(true);
       }
       throw err;
@@ -1068,11 +1068,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       const data = await res.json();
       if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.error || 'خطا در ارسال پاسخ به نود');
+        throw new Error(data.error || 'Failed to publish reply to node');
       }
 
       setReplyText('');
-      showToast('پاسخ در مم‌پول نود ثبت شد؛ پس از تایید در بلاک در ترد نمایش داده می‌شود.');
+      showToast('Reply submitted to node mempool. It will appear in thread once confirmed.');
 
       // Trigger thread refresh after 3.5s
       setTimeout(() => {
@@ -1081,7 +1081,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         }
       }, 3500);
     } catch (err: any) {
-      showToast(err.message || 'خطا در ارسال پاسخ');
+      showToast(err.message || 'Failed to publish reply');
     } finally {
       setIsPublishingReply(false);
     }
@@ -1849,10 +1849,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               type="button"
                               onClick={() => setIsComposeModalOpen(true)}
                               className="flex items-center gap-1.5 text-slate-500 hover:text-purple-700 hover:bg-purple-50 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors"
-                              title="افزودن عکس با سرویس Catbox"
+                              title="Attach images (up to 3)"
                             >
                               <ImageIcon className="h-4 w-4 text-purple-600" />
-                              <span>تصویر</span>
+                              <span>Image</span>
                             </button>
 
                             <span

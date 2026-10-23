@@ -74,7 +74,7 @@ export function TutorialContent({ lang }: TutorialContentProps) {
             </div>
             <p className="text-cyan-200/70 text-[11px] font-sans leading-relaxed">
               {isZh
-                ? '以太坊地址（通过 12/24 助记词 مشتق می‌شود），拥有对该 FID 的最高所有权。托管地址可以转移 FID、添加/注销应用签名密钥（Signers），但绝不能直接用于高频日常签名。'
+                ? '以太坊地址（通过 12/24 位助记词派生），拥有对该 FID 的最高所有权。托管地址可以转移 FID、添加/注销应用签名密钥（Signers），但绝不能直接用于高频日常签名。'
                 : 'The standard Ethereum address (derived from your 12 or 24-word seed phrase) that holds ultimate ownership of the FID. It has root permissions to transfer the FID or authorize signers, but should never be exposed for daily post signing.'}
             </p>
           </div>
