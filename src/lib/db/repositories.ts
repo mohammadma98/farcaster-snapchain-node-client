@@ -135,6 +135,57 @@ export class CastRepository {
     }
   }
 
+  static async deleteCast(hash: string): Promise<void> {
+    const pool = getDatabasePool();
+    const cleanHash = hash.startsWith('0x') ? hash : `0x${hash}`;
+    await pool.query('DELETE FROM casts WHERE hash = $1', [cleanHash]);
+    await pool.query('DELETE FROM cast_stats WHERE cast_hash = $1', [cleanHash]).catch(() => {});
+  }
+
+  /**
+   * Prune feed to maintain at most maxCasts (default 1000).
+   * Eviction priority: Oldest casts with the least engagement (likes + recasts + replies)
+   * are removed first, preserving highly engaged casts longer.
+   */
+  static async pruneFeed(maxCasts = 1000): Promise<number> {
+    const pool = getDatabasePool();
+    try {
+      const countRes = await pool.query(
+        'SELECT COUNT(*) AS total FROM casts WHERE parent_hash IS NULL'
+      );
+      const total = parseInt(countRes.rows[0]?.total || '0', 10);
+      if (total <= maxCasts) return 0;
+
+      const deleteCount = total - maxCasts;
+      const deleteRes = await pool.query(
+        `
+        DELETE FROM casts
+        WHERE hash IN (
+          SELECT c.hash
+          FROM casts c
+          LEFT JOIN cast_stats cs ON cs.cast_hash = c.hash
+          WHERE c.parent_hash IS NULL
+          ORDER BY
+            (COALESCE(cs.likes_count, 0) + COALESCE(cs.recasts_count, 0) + COALESCE(cs.replies_count, 0)) ASC,
+            c.timestamp ASC
+          LIMIT $1
+        )
+        `,
+        [deleteCount]
+      );
+
+      // Clean up orphaned stats
+      await pool.query(
+        'DELETE FROM cast_stats WHERE cast_hash NOT IN (SELECT hash FROM casts)'
+      ).catch(() => {});
+
+      return deleteRes.rowCount || 0;
+    } catch (err: any) {
+      console.warn('[CastRepository] pruneFeed error:', err.message);
+      return 0;
+    }
+  }
+
   static async getFeedCasts(options: {
     viewerFid?: number;
     fid?: number;
@@ -410,6 +461,34 @@ export class CheckpointRepository {
     );
     if (res.rows.length === 0) return 0;
     return Number(res.rows[0].last_timestamp || 0);
+  }
+
+  static async getEventCheckpoint(key: string): Promise<{ lastTimestamp: number; lastEventId: string | null } | null> {
+    const pool = getDatabasePool();
+    const res = await pool.query(
+      'SELECT last_timestamp, last_event_id FROM sync_checkpoints WHERE checkpoint_key = $1',
+      [key]
+    );
+    if (res.rows.length === 0) return null;
+    return {
+      lastTimestamp: Number(res.rows[0].last_timestamp || 0),
+      lastEventId: res.rows[0].last_event_id ? String(res.rows[0].last_event_id) : null,
+    };
+  }
+
+  static async updateEventCheckpoint(key: string, eventId: string, timestamp = Date.now()): Promise<void> {
+    const pool = getDatabasePool();
+    await pool.query(
+      `
+      INSERT INTO sync_checkpoints (checkpoint_key, last_timestamp, last_event_id, last_checked_at)
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (checkpoint_key) DO UPDATE SET
+        last_timestamp = EXCLUDED.last_timestamp,
+        last_event_id = EXCLUDED.last_event_id,
+        last_checked_at = NOW()
+      `,
+      [key, timestamp, eventId]
+    );
   }
 }
 

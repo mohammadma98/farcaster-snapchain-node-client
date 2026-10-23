@@ -94,8 +94,8 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}Preparing port 3000 and container environment...${NC}"
 
-# Stop any previous farcaster-client container
-$DOCKER_BIN rm -f farcaster-client > /dev/null 2>&1 || true
+# Stop any previous farcaster-client and farcaster-feed-worker containers
+$DOCKER_BIN rm -f farcaster-client farcaster-feed-worker > /dev/null 2>&1 || true
 
 # Kill any stale host processes on port 3000 if present
 if command -v fuser &> /dev/null; then
@@ -191,6 +191,21 @@ fi
 echo -e "  ${GREEN}✓ PostgreSQL Indexer is running (512MB cap, Zero-Config)${NC}"
 
 # ------------------------------------------------------------------------------
+# 4.6 Launch Sovereign Feed Indexer Worker (1000-cast smart eviction, Live Events)
+# ------------------------------------------------------------------------------
+echo -e "\n${CYAN}${BOLD}Launching Sovereign Feed Indexer Worker Container (farcaster-feed-worker)...${NC}"
+$DOCKER_BIN rm -f farcaster-feed-worker > /dev/null 2>&1 || true
+$DOCKER_BIN run -d \
+    --name farcaster-feed-worker \
+    --restart unless-stopped \
+    $NET_ARGS \
+    -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
+    -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
+    -e MAX_FEED_CASTS="1000" \
+    farcaster-client npm run worker > /dev/null 2>&1 || true
+echo -e "  ${GREEN}✓ Feed Indexer Worker is running (Live Event Stream, max 1000 casts)${NC}"
+
+# ------------------------------------------------------------------------------
 # 5. Launch Client (Interactive CLI or Background Web UI Container)
 # ------------------------------------------------------------------------------
 if [ "$CLIENT_TYPE" == "cli" ]; then
@@ -243,12 +258,14 @@ else
     echo -e "  - Web Client URL:  ${BOLD}${CYAN}http://${PUBLIC_IP}:3000${NC}"
     echo -e "  - Local Host URL:  ${BOLD}http://localhost:3000${NC}"
     echo -e "  - REST API Feed:   ${BOLD}http://${PUBLIC_IP}:3000/api/feed${NC}"
+    echo -e "  - Feed Indexer:    ${BOLD}farcaster-feed-worker (Live Event Stream, 1000-cast smart eviction)${NC}"
     echo -e "  - Target Node RPC: ${BOLD}${READ_NODE_URL}${NC}"
     echo -e "  - Postgres Engine: ${BOLD}farcaster-postgres (512MB RAM cap, Volume: farcaster-pgdata)${NC}"
     echo -e "  - Container Name:  ${BOLD}farcaster-client${NC} (Status: Running)"
     echo -e "  - Commit Build:    ${BOLD}${COMMIT_HASH}${NC}"
     echo -e "${GREEN}${BOLD}================================================================${NC}\n"
     echo -e "To view client container logs:  ${BOLD}${DOCKER_BIN} logs -f farcaster-client${NC}"
-    echo -e "To restart client container:    ${BOLD}${DOCKER_BIN} restart farcaster-client${NC}"
-    echo -e "To stop client container:       ${BOLD}${DOCKER_BIN} stop farcaster-client farcaster-postgres${NC}\n"
+    echo -e "To view feed worker logs:       ${BOLD}${DOCKER_BIN} logs -f farcaster-feed-worker${NC}"
+    echo -e "To restart client container:    ${BOLD}${DOCKER_BIN} restart farcaster-client farcaster-feed-worker${NC}"
+    echo -e "To stop all suite containers:   ${BOLD}${DOCKER_BIN} stop farcaster-client farcaster-feed-worker farcaster-postgres${NC}\n"
 fi

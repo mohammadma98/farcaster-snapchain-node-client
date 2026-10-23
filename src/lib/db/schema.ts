@@ -98,8 +98,10 @@ export async function initDatabaseSchema(): Promise<boolean> {
       CREATE TABLE IF NOT EXISTS sync_checkpoints (
         checkpoint_key VARCHAR(128) PRIMARY KEY,
         last_timestamp BIGINT NOT NULL DEFAULT 0,
+        last_event_id VARCHAR(64),
         last_checked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      ALTER TABLE sync_checkpoints ADD COLUMN IF NOT EXISTS last_event_id VARCHAR(64);
     `);
 
     await client.query('COMMIT');

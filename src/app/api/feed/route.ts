@@ -4,6 +4,7 @@ import { isPostgresAvailable } from '@/lib/db/pool';
 import { initDatabaseSchema } from '@/lib/db/schema';
 import { CastRepository, FollowRepository } from '@/lib/db/repositories';
 import { DeltaSyncService } from '@/lib/sync/delta-sync';
+import { FeedWorker } from '@/lib/sync/feed-worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +30,10 @@ export async function GET(request: Request) {
     if (hasDb) {
       await initDatabaseSchema().catch(() => {});
 
-      // SWR: Queue background sync for followings & newest casts
+      // SWR: Ensure Feed Worker is indexing live events (advisory lock prevents duplicate runners)
+      new FeedWorker({ nodeUrl }).start().catch(() => {});
+
+      // SWR: Queue background sync for followings
       if (viewerFid && mode !== 'global') {
         DeltaSyncService.syncFollows(viewerFid, nodeUrl).catch(() => {});
         FollowRepository.getFollowedFids(viewerFid)
@@ -38,9 +42,6 @@ export async function GET(request: Request) {
             DeltaSyncService.syncNewestCasts(syncFids, nodeUrl, 5).catch(() => {});
           })
           .catch(() => {});
-      } else {
-        // Global feed sync
-        DeltaSyncService.syncNewestCasts(ACTIVE_NETWORK_CREATORS, nodeUrl, 5).catch(() => {});
       }
 
       // Query optimized PostgreSQL index
