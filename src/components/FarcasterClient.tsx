@@ -1331,9 +1331,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       {/* Main Container: 3 Columns */}
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* LEFT SIDEBAR (Desktop) */}
-          <aside className="lg:col-span-3 space-y-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-2 sticky top-20">
+          {/* LEFT SIDEBAR (Desktop & Mobile) */}
+          <aside className="lg:col-span-3 space-y-4 lg:sticky lg:top-20 self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto pr-0.5">
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-2">
               {/* Navigation Items */}
               <nav className="space-y-1">
                 <button
@@ -1419,6 +1419,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 </div>
               )}
             </div>
+
+            {/* User Portfolio: Primary Wallet Card (Base & Ethereum) */}
+            <WalletCard session={session} onOpenAuthModal={() => setIsAuthModalOpen(true)} />
           </aside>
 
           {/* CENTER COLUMN (Main Feed / Thread / Profile) */}
@@ -2715,9 +2718,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 MIT License • mohammadma98
               </div>
             </div>
-
-            {/* User Portfolio: Primary Wallet (Base & Ethereum) */}
-            <WalletCard session={session} />
           </aside>
         </div>
       </div>
