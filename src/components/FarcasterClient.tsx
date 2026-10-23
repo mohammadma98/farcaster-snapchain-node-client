@@ -1353,22 +1353,20 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
               <hr className="border-slate-100 my-2" />
 
-              {/* Compose Quick Button */}
-              <button
-                onClick={() => {
-                  handleBackToFeed(true);
-                  if (!session) {
-                    setIsAuthModalOpen(true);
-                  } else {
+              {/* Compose Quick Button (Only for Logged-In Users) */}
+              {session && (
+                <button
+                  onClick={() => {
+                    handleBackToFeed(true);
                     const el = document.getElementById('composer-textarea');
                     el?.focus();
-                  }
-                }}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-semibold py-3 px-4 text-sm shadow-md shadow-purple-600/20 transition-all"
-              >
-                <Send className="h-4 w-4" />
-                <span>New Cast</span>
-              </button>
+                  }}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-semibold py-3 px-4 text-sm shadow-md shadow-purple-600/20 transition-all"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>New Cast</span>
+                </button>
+              )}
 
               {/* User Session Pill in Sidebar */}
               {session ? (
@@ -1448,15 +1446,36 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                       </button>
                     </div>
 
-                    <button
-                      onClick={() => fetchFeed(sourceFilter, feedMode, session.fid)}
-                      title="Refresh Feed"
-                      className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors shrink-0"
-                    >
-                      <RefreshCw
-                        className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
-                      />
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setIsNodeDropdownOpen(true)}
+                        className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
+                        title="Active Snapchain Node - Click to switch"
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                          }`}
+                        />
+                        <span className="font-semibold text-slate-800 hidden sm:inline">
+                          {nodeUrl.includes('162.35.98.172')
+                            ? '162.35.98.172'
+                            : nodeUrl.includes('127.0.0.1')
+                            ? 'localhost'
+                            : 'Custom Node'}
+                        </span>
+                        <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                      </button>
+                      <button
+                        onClick={() => fetchFeed(sourceFilter, feedMode, session.fid)}
+                        title="Refresh Feed"
+                        className="p-2 rounded-xl text-slate-500 hover:text-purple-700 hover:bg-purple-50 transition-colors shrink-0"
+                      >
+                        <RefreshCw
+                          className={`h-4 w-4 ${isLoadingFeed ? 'animate-spin text-purple-600' : ''}`}
+                        />
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center justify-between gap-3">
@@ -1479,6 +1498,25 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
+                        onClick={() => setIsNodeDropdownOpen(true)}
+                        className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
+                        title="Active Snapchain Node - Click to switch"
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                          }`}
+                        />
+                        <span className="font-semibold text-slate-800 hidden sm:inline">
+                          {nodeUrl.includes('162.35.98.172')
+                            ? '162.35.98.172'
+                            : nodeUrl.includes('127.0.0.1')
+                            ? 'localhost'
+                            : 'Custom Node'}
+                        </span>
+                        <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                      </button>
+                      <button
                         onClick={() => setIsAuthModalOpen(true)}
                         className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
                       >
@@ -1498,202 +1536,69 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   </div>
                 )}
 
-                {/* Client Source Filters & Node Source Dropdown Bar */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-xs flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto scrollbar-none">
-                    <span className="text-xs font-bold text-slate-400 pl-1 uppercase tracking-wider shrink-0">
-                      Source:
-                    </span>
+                {/* Inline Cast Composer (Only for Logged-In Users) */}
+                {session && (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
+                    <div className="flex gap-3">
+                      <FarcasterAvatar
+                        src={session?.pfpUrl}
+                        alt={session?.username || 'You'}
+                        fid={session?.fid}
+                        username={session?.username}
+                        className="h-10 w-10 rounded-full object-cover border border-purple-200 shrink-0"
+                      />
+                      <div className="flex-1 space-y-2">
+                        <textarea
+                          id="composer-textarea"
+                          value={composeText}
+                          onChange={(e) => setComposeText(e.target.value)}
+                          placeholder={`What's happening on Farcaster, @${session.username}?`}
+                          rows={3}
+                          maxLength={320}
+                          className="w-full text-sm text-slate-900 placeholder:text-slate-400 border-none outline-none resize-none bg-transparent"
+                        />
 
-                    {/* All Sources Dropdown */}
-                    <div className="relative shrink-0">
-                      <button
-                        onClick={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                          sourceFilter !== 'all'
-                            ? 'bg-purple-700 text-white border-purple-700 shadow-xs'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        <Filter className="h-3 w-3" />
-                        <span>
-                          {sourceFilter === 'all'
-                            ? 'All Sources'
-                            : sourceFilter}
-                        </span>
-                        <ChevronDown className="h-3 w-3 opacity-70" />
-                      </button>
-
-                      {isSourceDropdownOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setIsSourceDropdownOpen(false)}
-                          />
-                          <div className="absolute left-0 mt-2 w-64 max-h-80 overflow-y-auto rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-2 space-y-1">
-                            <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                              Select Client / Node Source
+                        {/* Quoted Cast Preview Box */}
+                        {quoteCast && (
+                          <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 relative text-xs space-y-1">
+                            <button
+                              onClick={() => setQuoteCast(null)}
+                              className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 p-0.5"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
+                              <Quote className="h-3 w-3 text-purple-600" />
+                              <span>Quoting @{quoteCast.author?.username || quoteCast.fid}</span>
                             </div>
-
-                            {castSources.map((source) => {
-                              const isSelected = sourceFilter === source.id;
-                              return (
-                                <button
-                                  key={source.id}
-                                  onClick={() => {
-                                    setSourceFilter(source.id);
-                                    setIsSourceDropdownOpen(false);
-                                    fetchFeed(source.id, feedMode, session?.fid);
-                                  }}
-                                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors ${
-                                    isSelected
-                                      ? 'bg-purple-50 text-purple-900 font-bold'
-                                      : 'hover:bg-slate-50 text-slate-700'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span
-                                      className={`h-2 w-2 rounded-full shrink-0 ${
-                                        source.id === 'all'
-                                          ? 'bg-purple-600'
-                                          : getClientDotColor(source.id)
-                                      }`}
-                                    />
-                                    <span className="truncate">{source.label}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0 pl-2">
-                                    {source.count > 0 && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-mono">
-                                        {source.count}
-                                      </span>
-                                    )}
-                                    {isSelected && (
-                                      <Check className="h-3.5 w-3.5 text-purple-700" />
-                                    )}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                            <p className="text-slate-700 line-clamp-2">{quoteCast.text}</p>
                           </div>
-                        </>
-                      )}
-                    </div>
+                        )}
 
-                    {/* Quick Access Top Source Pills */}
-                    <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-                      {[
-                        { id: 'all', label: 'All' },
-                        { id: 'Direct Snapchain', label: 'Direct Snapchain' },
-                        { id: 'Warpcast', label: 'Warpcast' },
-                        { id: 'Supercast', label: 'Supercast' },
-                      ].map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => {
-                            setSourceFilter(f.id);
-                            fetchFeed(f.id, feedMode, session?.fid);
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                            sourceFilter === f.id
-                              ? 'bg-purple-700 text-white shadow-xs'
-                              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                          }`}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-[11px] font-mono ${
+                                composeText.length > 300 ? 'text-amber-600 font-bold' : 'text-slate-400'
+                              }`}
+                            >
+                              {composeText.length}/320
+                            </span>
+                          </div>
 
-                  {/* Active Node Quick Switcher Badge */}
-                  <div className="relative shrink-0">
-                    <button
-                      onClick={() => setIsNodeDropdownOpen(true)}
-                      className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-slate-600 hover:text-purple-700 bg-slate-50 hover:bg-purple-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all"
-                      title="Active Snapchain Node - Click to switch"
-                    >
-                      <span
-                        className={`h-2 w-2 rounded-full ${
-                          nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                        }`}
-                      />
-                      <span className="font-semibold text-slate-800">
-                        {nodeUrl.includes('162.35.98.172')
-                          ? '162.35.98.172'
-                          : nodeUrl.includes('127.0.0.1')
-                          ? 'localhost'
-                          : 'Custom Node'}
-                      </span>
-                      <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Inline Cast Composer */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
-                  <div className="flex gap-3">
-                    <FarcasterAvatar
-                      src={session?.pfpUrl}
-                      alt={session?.username || 'You'}
-                      fid={session?.fid}
-                      username={session?.username}
-                      className="h-10 w-10 rounded-full object-cover border border-purple-200 shrink-0"
-                    />
-                    <div className="flex-1 space-y-2">
-                      <textarea
-                        id="composer-textarea"
-                        value={composeText}
-                        onChange={(e) => setComposeText(e.target.value)}
-                        placeholder={
-                          session
-                            ? `What's happening on Farcaster, @${session.username}?`
-                            : "Cast to Snapchain (Click to log in)..."
-                        }
-                        rows={3}
-                        maxLength={320}
-                        className="w-full text-sm text-slate-900 placeholder:text-slate-400 border-none outline-none resize-none bg-transparent"
-                      />
-
-                      {/* Quoted Cast Preview Box */}
-                      {quoteCast && (
-                        <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 relative text-xs space-y-1">
                           <button
-                            onClick={() => setQuoteCast(null)}
-                            className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 p-0.5"
+                            onClick={handlePublishCast}
+                            disabled={isPublishing || !composeText.trim()}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
                           >
-                            <X className="h-3.5 w-3.5" />
+                            <Send className="h-3 w-3" />
+                            <span>{isPublishing ? 'Publishing...' : 'Cast'}</span>
                           </button>
-                          <div className="flex items-center gap-1.5 font-semibold text-purple-900">
-                            <Quote className="h-3 w-3 text-purple-600" />
-                            <span>Quoting @{quoteCast.author?.username || quoteCast.fid}</span>
-                          </div>
-                          <p className="text-slate-700 line-clamp-2">{quoteCast.text}</p>
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`text-[11px] font-mono ${
-                              composeText.length > 300 ? 'text-amber-600 font-bold' : 'text-slate-400'
-                            }`}
-                          >
-                            {composeText.length}/320
-                          </span>
-                        </div>
-
-                        <button
-                          onClick={handlePublishCast}
-                          disabled={isPublishing || !composeText.trim()}
-                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
-                        >
-                          <Send className="h-3 w-3" />
-                          <span>{isPublishing ? 'Publishing...' : 'Cast'}</span>
-                        </button>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* Casts Stream */}
                 {isLoadingFeed ? (
@@ -1864,6 +1769,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           {/* Quote */}
                           <button
                             onClick={() => {
+                              if (!session) {
+                                setIsAuthModalOpen(true);
+                                return;
+                              }
                               setQuoteCast(cast);
                               const el = document.getElementById('composer-textarea');
                               el?.focus();
@@ -2046,6 +1955,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                         </button>
                         <button
                           onClick={() => {
+                            if (!session) {
+                              setIsAuthModalOpen(true);
+                              return;
+                            }
                             setQuoteCast(currentThreadCast);
                             setActiveTab('feed');
                             setTimeout(() => {
@@ -2444,6 +2357,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               </button>
                               <button
                                 onClick={() => {
+                                  if (!session) {
+                                    setIsAuthModalOpen(true);
+                                    return;
+                                  }
                                   setQuoteCast(cast);
                                   setActiveTab('feed');
                                   setTimeout(() => {
@@ -2658,6 +2575,123 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Client / Source Selection Dropdown Widget */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-purple-600" />
+                  <span className="font-bold text-xs text-slate-900 uppercase tracking-wider">
+                    Feed Source
+                  </span>
+                </div>
+                {sourceFilter !== 'all' && (
+                  <button
+                    onClick={() => {
+                      setSourceFilter('all');
+                      setIsSourceDropdownOpen(false);
+                      fetchFeed('all', feedMode, session?.fid);
+                    }}
+                    className="text-[11px] text-purple-700 hover:text-purple-800 font-semibold"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              {/* Source Dropdown Menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                    sourceFilter !== 'all'
+                      ? 'bg-purple-50 text-purple-900 border-purple-200 shadow-xs'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                        sourceFilter === 'all'
+                          ? 'bg-purple-600'
+                          : getClientDotColor(sourceFilter)
+                      }`}
+                    />
+                    <span className="truncate">
+                      {castSources.find((s) => s.id === sourceFilter)?.label ||
+                        (sourceFilter === 'all' ? 'All Clients / Sources' : sourceFilter)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {sourceFilter !== 'all' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-200 text-purple-800 font-mono">
+                        {castSources.find((s) => s.id === sourceFilter)?.count || 0}
+                      </span>
+                    )}
+                    <ChevronDown
+                      className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${
+                        isSourceDropdownOpen ? 'rotate-180 text-purple-600' : ''
+                      }`}
+                    />
+                  </div>
+                </button>
+
+                {isSourceDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsSourceDropdownOpen(false)}
+                    />
+                    <div className="absolute left-0 right-0 mt-1.5 max-h-72 overflow-y-auto rounded-2xl bg-white border border-slate-200 shadow-xl z-50 p-1.5 space-y-1">
+                      <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Select Client / Protocol Source
+                      </div>
+
+                      {castSources.map((source) => {
+                        const isSelected = sourceFilter === source.id;
+                        return (
+                          <button
+                            key={source.id}
+                            onClick={() => {
+                              setSourceFilter(source.id);
+                              setIsSourceDropdownOpen(false);
+                              fetchFeed(source.id, feedMode, session?.fid);
+                            }}
+                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs transition-colors ${
+                              isSelected
+                                ? 'bg-purple-50 text-purple-900 font-bold'
+                                : 'hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`h-2 w-2 rounded-full shrink-0 ${
+                                  source.id === 'all'
+                                    ? 'bg-purple-600'
+                                    : getClientDotColor(source.id)
+                                }`}
+                              />
+                              <span className="truncate">{source.label}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                              {source.count > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-mono">
+                                  {source.count}
+                                </span>
+                              )}
+                              {isSelected && (
+                                <Check className="h-3.5 w-3.5 text-purple-700" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Who To Follow Widget */}
