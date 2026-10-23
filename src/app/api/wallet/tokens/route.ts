@@ -94,10 +94,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   let address = searchParams.get('address')?.trim();
   const fidParam = searchParams.get('fid');
-  const fallbackAddress = searchParams.get('fallbackAddress')?.trim();
   const nodeUrl = process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
-  let addressSource: 'provided' | 'primary' | 'verification' | 'custody' | 'fallback' | null = address ? 'provided' : null;
+  let addressSource: 'provided' | 'primary' | 'verification' | null = address ? 'provided' : null;
 
   // 1. Resolve Primary Address if FID is provided and address is missing
   if (!address && fidParam) {
@@ -142,18 +141,12 @@ export async function GET(request: Request) {
     }
   }
 
-  // 1.5. Fallback to session custody address if protocol lookup yielded no explicit address
-  if (!address && fallbackAddress && /^0x[a-fA-F0-9]{40}$/.test(fallbackAddress)) {
-    address = fallbackAddress;
-    addressSource = 'custody';
-  }
-
-  // If still no address found
+  // If no primary or verified wallet address found (strictly NO custody address fallback)
   if (!address) {
     return NextResponse.json(
       {
         status: 'no_address',
-        message: 'No Ethereum primary wallet found for this user.',
+        message: 'Primary wallet address not detected. Please try again later.',
         tokens: [],
         totalUsd: 0,
       },

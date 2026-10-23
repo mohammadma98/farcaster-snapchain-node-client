@@ -92,9 +92,6 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
     try {
       const queryParams = new URLSearchParams();
       queryParams.set('fid', String(session.fid));
-      if (session.custodyAddress) {
-        queryParams.set('fallbackAddress', session.custodyAddress);
-      }
 
       const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
       const data = await res.json();
@@ -110,16 +107,16 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
         setTokens([]);
         setTotalUsd(0);
         setResolvedAddress(null);
-        setError('No primary EVM address found for this account.');
+        setError('Primary wallet address not detected. Please try again later.');
       } else {
-        setError(data.message || 'Unable to load wallet balances.');
+        setError(data.message || 'Primary wallet address not detected. Please try again later.');
       }
     } catch (err: any) {
-      setError(err.message || 'Network error fetching wallet data.');
+      setError('Primary wallet address not detected. Please try again later.');
     } finally {
       setIsLoading(false);
     }
-  }, [session?.fid, session?.custodyAddress]);
+  }, [session?.fid]);
 
   useEffect(() => {
     if (session?.fid) {
@@ -297,15 +294,18 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
         </div>
       )}
 
-      {/* ERROR STATE */}
-      {!isLoading && error && (
-        <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 p-3 text-center space-y-1.5">
-          <p className="text-xs text-amber-800 font-medium">{error}</p>
+      {/* PRIMARY WALLET NOT DETECTED / ERROR STATE */}
+      {!isLoading && (!resolvedAddress || error) && (
+        <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-4 text-center space-y-2">
+          <p className="text-xs text-slate-600 font-medium leading-relaxed">
+            Primary wallet address not detected. Please try again later.
+          </p>
           <button
             onClick={() => fetchWalletData()}
-            className="text-[11px] text-amber-900 underline font-semibold hover:text-amber-950"
+            className="inline-flex items-center gap-1.5 text-xs text-purple-700 font-semibold hover:text-purple-800 transition-colors"
           >
-            Retry Connection
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Retry</span>
           </button>
         </div>
       )}
@@ -467,11 +467,8 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
 
             {/* Zero Assets State */}
             {tokens.length === 0 && (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-3 text-center space-y-1">
-                <p className="text-xs text-slate-500">No assets &gt; $1.00 found</p>
-                <p className="text-[10px] text-slate-400">
-                  Transfer Base ETH or ERC-20 to this address to monitor here.
-                </p>
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-3.5 text-center">
+                <p className="text-xs text-slate-500 font-medium">No assets &gt; $1.00 found</p>
               </div>
             )}
 
@@ -580,8 +577,8 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
                   ))}
 
                   {filteredTokens.length === 0 && (
-                    <div className="py-4 text-center text-xs text-slate-400">
-                      No assets found for the selected network filter.
+                    <div className="py-4 text-center text-xs text-slate-400 font-medium">
+                      No assets &gt; $1.00 found
                     </div>
                   )}
                 </div>

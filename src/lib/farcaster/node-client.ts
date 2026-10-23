@@ -480,12 +480,12 @@ export class SnapchainNodeClient {
   ): Promise<{
     ethAddress: string | null;
     solAddress: string | null;
-    source: 'primary' | 'verification' | 'custody' | null;
+    source: 'primary' | 'verification' | null;
   }> {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
     let ethAddress: string | null = null;
     let solAddress: string | null = null;
-    let source: 'primary' | 'verification' | 'custody' | null = null;
+    let source: 'primary' | 'verification' | null = null;
 
     try {
       const userRes = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
@@ -515,7 +515,7 @@ export class SnapchainNodeClient {
       // ignore
     }
 
-    // Fallback 1: First verified Ethereum address
+    // Fallback: First verified Ethereum address
     if (!ethAddress) {
       try {
         const verifRes = await fetch(`${cleanUrl}/v1/verificationsByFid?fid=${fid}`, {
@@ -536,29 +536,6 @@ export class SnapchainNodeClient {
                   break;
                 }
               }
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    // Fallback 2: On-chain custody address from IdRegistry
-    if (!ethAddress) {
-      try {
-        const onChainRes = await fetch(`${cleanUrl}/v1/onChainEventsByFid?fid=${fid}&event_type=2`, {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        });
-        if (onChainRes.ok) {
-          const data = await onChainRes.json();
-          const events = data.events || [];
-          if (events.length > 0) {
-            const cust = events[0]?.idRegisterEventBody?.to;
-            if (cust && typeof cust === 'string' && cust.startsWith('0x')) {
-              ethAddress = cust;
-              source = 'custody';
             }
           }
         }
