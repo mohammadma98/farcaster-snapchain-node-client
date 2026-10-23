@@ -12,7 +12,9 @@ export async function GET(
   try {
     const { id } = params;
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '30', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const cursorParam = searchParams.get('cursor');
+    const cursorTimestamp = cursorParam ? parseInt(cursorParam, 10) : undefined;
     const tab = searchParams.get('tab') || 'casts'; // 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes'
     const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
@@ -26,6 +28,44 @@ export async function GET(
 
     const viewerFid = searchParams.get('viewerFid') ? parseInt(searchParams.get('viewerFid')!, 10) : undefined;
     let resultCasts: FarcasterCast[] = [];
+
+    // Check PostgreSQL
+    let hasDb = false;
+    try {
+      const { isPostgresAvailable } = await import('@/lib/db/pool');
+      hasDb = await isPostgresAvailable();
+    } catch {
+      hasDb = false;
+    }
+
+    if (tab === 'casts' && hasDb) {
+      const { CastRepository } = await import('@/lib/db/repositories');
+      const { DeltaSyncService } = await import('@/lib/sync/delta-sync');
+      
+      const dbCasts = await CastRepository.getFeedCasts({
+        fid: user.fid,
+        viewerFid,
+        limit,
+        cursorTimestamp,
+      });
+
+      if (dbCasts.length > 0) {
+        for (const c of dbCasts) {
+          DeltaSyncService.syncCastStats(c.hash, c.fid, nodeUrl).catch(() => {});
+        }
+        return NextResponse.json({
+          status: 'ok',
+          fid: user.fid,
+          username: user.username,
+          tab,
+          casts: dbCasts,
+          count: dbCasts.length,
+          hasMore: dbCasts.length >= limit,
+          nextCursor: dbCasts[dbCasts.length - 1]?.timestamp,
+          storage: 'postgres',
+        });
+      }
+    }
 
     if (tab === 'likes' || tab === 'recasts') {
       const reactionType = tab === 'likes' ? 'like' : 'recast';

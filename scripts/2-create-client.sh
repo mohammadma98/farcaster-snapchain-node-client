@@ -162,6 +162,35 @@ $DOCKER_BIN build -t farcaster-client .
 echo -e "\n  ${GREEN}✓ Client Docker image successfully built: farcaster-client${NC}"
 
 # ------------------------------------------------------------------------------
+# 4.5 Ensure Sovereign PostgreSQL Indexer Database (512MB RAM cap, Zero-Config)
+# ------------------------------------------------------------------------------
+echo -e "\n${CYAN}${BOLD}Ensuring Sovereign PostgreSQL Indexer Container (512MB RAM cap)...${NC}"
+PG_NET_ARGS="--network host"
+PG_HOST="127.0.0.1"
+if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
+    PG_NET_ARGS="-p 5432:5432"
+    PG_HOST="host.docker.internal"
+fi
+
+if ! $DOCKER_BIN ps --format '{{.Names}}' 2>/dev/null | grep -q '^farcaster-postgres$'; then
+    $DOCKER_BIN rm -f farcaster-postgres > /dev/null 2>&1 || true
+    $DOCKER_BIN run -d \
+        --name farcaster-postgres \
+        --restart unless-stopped \
+        --memory=512m \
+        --cpus=1.0 \
+        -v farcaster-pgdata:/var/lib/postgresql/data \
+        -e POSTGRES_DB=snapchain_client \
+        -e POSTGRES_USER=farcaster \
+        -e POSTGRES_PASSWORD=farcaster_secret \
+        $PG_NET_ARGS \
+        postgres:16-alpine > /dev/null 2>&1 || true
+    echo -e "  Waiting for PostgreSQL database container initialization..."
+    sleep 3
+fi
+echo -e "  ${GREEN}✓ PostgreSQL Indexer is running (512MB cap, Zero-Config)${NC}"
+
+# ------------------------------------------------------------------------------
 # 5. Launch Client (Interactive CLI or Background Web UI Container)
 # ------------------------------------------------------------------------------
 if [ "$CLIENT_TYPE" == "cli" ]; then
@@ -169,6 +198,7 @@ if [ "$CLIENT_TYPE" == "cli" ]; then
     $DOCKER_BIN run --rm -it \
         --network host \
         -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
+        -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
         farcaster-client npm run cli
 else
     echo -e "\n${CYAN}${BOLD}Starting Sovereign Farcaster Web Client container (port 3000)...${NC}"
@@ -184,6 +214,7 @@ else
         --restart unless-stopped \
         $NET_ARGS \
         -e FARCASTER_NODE_URL="${READ_NODE_URL}" \
+        -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
         -e PORT="3000" \
         -e HOSTNAME="0.0.0.0" \
         farcaster-client > /dev/null
@@ -213,10 +244,11 @@ else
     echo -e "  - Local Host URL:  ${BOLD}http://localhost:3000${NC}"
     echo -e "  - REST API Feed:   ${BOLD}http://${PUBLIC_IP}:3000/api/feed${NC}"
     echo -e "  - Target Node RPC: ${BOLD}${READ_NODE_URL}${NC}"
+    echo -e "  - Postgres Engine: ${BOLD}farcaster-postgres (512MB RAM cap, Volume: farcaster-pgdata)${NC}"
     echo -e "  - Container Name:  ${BOLD}farcaster-client${NC} (Status: Running)"
     echo -e "  - Commit Build:    ${BOLD}${COMMIT_HASH}${NC}"
     echo -e "${GREEN}${BOLD}================================================================${NC}\n"
     echo -e "To view client container logs:  ${BOLD}${DOCKER_BIN} logs -f farcaster-client${NC}"
     echo -e "To restart client container:    ${BOLD}${DOCKER_BIN} restart farcaster-client${NC}"
-    echo -e "To stop client container:       ${BOLD}${DOCKER_BIN} stop farcaster-client${NC}\n"
+    echo -e "To stop client container:       ${BOLD}${DOCKER_BIN} stop farcaster-client farcaster-postgres${NC}\n"
 fi

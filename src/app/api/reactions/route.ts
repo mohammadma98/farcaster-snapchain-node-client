@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { defaultNodeClient } from '@/lib/farcaster/node-client';
 import { feedStore } from '@/lib/farcaster/feed-store';
+import { isPostgresAvailable } from '@/lib/db/pool';
+import { ViewerInteractionsRepository } from '@/lib/db/repositories';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
 
     const targetNodeUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
-    // 1. Submit to Snapchain node
+    // 1. Submit to Snapchain node mempool
     const nodeResult = await defaultNodeClient.publishReaction(
       fid,
       signerPrivateKey,
@@ -50,8 +52,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Update local state only upon accepted submission
+    // 2. Update local in-memory state
     const reactionState = feedStore.toggleReaction(targetHash, type, fid);
+
+    // 3. Update PostgreSQL persistent state if available
+    const hasDb = await isPostgresAvailable();
+    if (hasDb) {
+      ViewerInteractionsRepository.recordInteraction(fid, targetHash, type, !!isRemove).catch(() => {});
+    }
 
     return NextResponse.json({
       status: 'ok',

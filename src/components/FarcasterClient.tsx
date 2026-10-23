@@ -177,6 +177,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [sourceFilter, setSourceFilter] = useState('all');
   const [feedMode, setFeedMode] = useState<'following' | 'global'>('global');
+  const [feedCursor, setFeedCursor] = useState<number | undefined>(undefined);
+  const [hasMoreFeed, setHasMoreFeed] = useState<boolean>(true);
+  const [isLoadingMoreFeed, setIsLoadingMoreFeed] = useState<boolean>(false);
+  const feedObserverTarget = useRef<HTMLDivElement>(null);
 
   // Composer State
   const [composeText, setComposeText] = useState('');
@@ -320,6 +324,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       overrideNodeUrl?: string
     ) => {
       setIsLoadingFeed(true);
+      setFeedCursor(undefined);
+      setHasMoreFeed(true);
       try {
         const effectiveMode = explicitViewerFid ? mode : 'global';
         const activeFollows = overrideFollowedFids || followedFids;
@@ -333,11 +339,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             ? `&followedFids=${Array.from(activeFollows).join(',')}`
             : '';
         const targetNode = overrideNodeUrl || nodeUrl;
-        const url = `/api/feed?source=${encodeURIComponent(filter)}${viewerParam}${modeParam}${followsParam}&nodeUrl=${encodeURIComponent(targetNode)}`;
+        const url = `/api/feed?limit=5&source=${encodeURIComponent(filter)}${viewerParam}${modeParam}${followsParam}&nodeUrl=${encodeURIComponent(targetNode)}`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.casts) {
           setCasts(data.casts);
+          setFeedCursor(data.nextCursor);
+          setHasMoreFeed(Boolean(data.hasMore));
         }
       } catch (err) {
         console.error('Error fetching feed:', err);
@@ -347,6 +355,56 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     },
     [nodeUrl, sourceFilter, session?.fid, feedMode, followedFids]
   );
+
+  // 3b. Fetch Next Batch of 5 Casts (Infinite Scroll)
+  const fetchMoreFeed = useCallback(async () => {
+    if (isLoadingMoreFeed || !hasMoreFeed || !feedCursor) return;
+    setIsLoadingMoreFeed(true);
+    try {
+      const effectiveMode = session?.fid ? feedMode : 'global';
+      const viewerParam =
+        session?.fid && effectiveMode === 'following'
+          ? `&viewerFid=${session.fid}`
+          : '';
+      const modeParam = `&mode=${effectiveMode}`;
+      const url = `/api/feed?limit=5&cursor=${feedCursor}&source=${encodeURIComponent(sourceFilter)}${viewerParam}${modeParam}&nodeUrl=${encodeURIComponent(nodeUrl)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (Array.isArray(data.casts) && data.casts.length > 0) {
+        setCasts((prev) => {
+          const seen = new Set(prev.map((c) => c.hash));
+          const newUnique = data.casts.filter((c: FarcasterCast) => !seen.has(c.hash));
+          return [...prev, ...newUnique];
+        });
+        setFeedCursor(data.nextCursor);
+        setHasMoreFeed(Boolean(data.hasMore));
+      } else {
+        setHasMoreFeed(false);
+      }
+    } catch (err) {
+      console.warn('Error loading more casts:', err);
+    } finally {
+      setIsLoadingMoreFeed(false);
+    }
+  }, [isLoadingMoreFeed, hasMoreFeed, feedCursor, session?.fid, feedMode, sourceFilter, nodeUrl]);
+
+  // Infinite Scroll IntersectionObserver
+  useEffect(() => {
+    if (!hasMoreFeed || isLoadingMoreFeed || isLoadingFeed) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          fetchMoreFeed();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    const target = feedObserverTarget.current;
+    if (target) observer.observe(target);
+    return () => {
+      if (target) observer.unobserve(target);
+    };
+  }, [hasMoreFeed, isLoadingMoreFeed, isLoadingFeed, fetchMoreFeed]);
 
   // 1. Initial Load & Restore Session
   useEffect(() => {
@@ -1801,6 +1859,26 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                         </div>
                       </article>
                     ))}
+
+                    {/* Infinite Scroll Sentinel / Load More */}
+                    {hasMoreFeed && (
+                      <div ref={feedObserverTarget} className="pt-4 pb-2 text-center">
+                        <button
+                          onClick={fetchMoreFeed}
+                          disabled={isLoadingMoreFeed}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-xs transition-all disabled:opacity-60"
+                        >
+                          {isLoadingMoreFeed ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-purple-600" />
+                              <span>Loading more casts...</span>
+                            </>
+                          ) : (
+                            <span>Load More Casts (↓)</span>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

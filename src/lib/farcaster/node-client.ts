@@ -745,6 +745,86 @@ export class SnapchainNodeClient {
   }
 
   /**
+   * Fetch reaction counts (Likes & Recasts) for a specific cast directly from the Snapchain node
+   */
+  async getReactionsByCast(
+    targetFid: number,
+    targetHashHex: string,
+    pageSize = 100,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<{ likesCount: number; recastsCount: number; latestTimestamp: number }> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanHash = targetHashHex.startsWith('0x') ? targetHashHex : `0x${targetHashHex}`;
+
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/reactionsByCast?target_fid=${targetFid}&target_hash=${cleanHash}&pageSize=${pageSize}`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(6000),
+        }
+      );
+
+      if (!response.ok) {
+        return { likesCount: 0, recastsCount: 0, latestTimestamp: 0 };
+      }
+
+      const data = await response.json();
+      const messages = data.messages || [];
+      let likesCount = 0;
+      let recastsCount = 0;
+      let latestTimestamp = 0;
+
+      for (const msg of messages) {
+        if (msg.data?.type && msg.data.type !== 'MESSAGE_TYPE_REACTION_ADD') continue;
+        const rType = msg.data?.reactionBody?.type;
+        const msgTime = Number(msg.data?.timestamp || 0);
+        if (msgTime > latestTimestamp) {
+          latestTimestamp = msgTime;
+        }
+
+        if (rType === 'REACTION_TYPE_LIKE' || rType === 1 || rType === 'Like') {
+          likesCount++;
+        } else if (rType === 'REACTION_TYPE_RECAST' || rType === 2 || rType === 'Recast') {
+          recastsCount++;
+        }
+      }
+
+      return { likesCount, recastsCount, latestTimestamp };
+    } catch {
+      return { likesCount: 0, recastsCount: 0, latestTimestamp: 0 };
+    }
+  }
+
+  /**
+   * Fetch reply count for a specific cast from the Snapchain node
+   */
+  async getRepliesCountByCast(
+    parentFid: number,
+    parentHashHex: string,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<number> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const cleanHash = parentHashHex.startsWith('0x') ? parentHashHex : `0x${parentHashHex}`;
+
+    try {
+      const response = await fetch(
+        `${cleanUrl}/v1/castsByParent?fid=${parentFid}&hash=${cleanHash}&pageSize=100`,
+        {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(6000),
+        }
+      );
+
+      if (!response.ok) return 0;
+      const data = await response.json();
+      return Array.isArray(data.messages) ? data.messages.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
    * Publish a cast directly to the local node's mempool via protobuf
    * Supports normal casts, replies (parentCastId), and quote casts (embeds with castId)
    */

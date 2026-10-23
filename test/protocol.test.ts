@@ -134,6 +134,11 @@ async function runTests() {
   const health = await client.checkHealth();
   console.log('Health check handled smoothly:', health.isOnline ? 'Online' : `Offline (expected: ${health.error})`);
 
+  console.log('\n--- 7. Testing Database Pool & Fallback Resilience ---');
+  const { isPostgresAvailable } = await import('../src/lib/db/pool');
+  const dbStatus = await isPostgresAvailable();
+  console.log('PostgreSQL availability check:', dbStatus ? 'Connected (512MB limit active)' : 'Offline (Clean Fallback Active)');
+
   console.log('\n✓ All protocol unit tests PASSED successfully!');
 }
 

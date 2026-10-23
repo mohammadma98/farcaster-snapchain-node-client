@@ -80,6 +80,18 @@ export async function POST(request: Request) {
     // 4. Store in local registry so it immediately appears in all feeds & threads
     feedStore.addCast(newCast);
 
+    // 5. Persist to PostgreSQL if available
+    try {
+      const { isPostgresAvailable } = await import('@/lib/db/pool');
+      const hasDb = await isPostgresAvailable();
+      if (hasDb) {
+        const { CastRepository } = await import('@/lib/db/repositories');
+        CastRepository.upsertCast(newCast).catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
     return NextResponse.json({
       status: 'ok',
       success: true,
