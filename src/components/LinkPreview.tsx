@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ExternalLink, Globe, Play, Image as ImageIcon } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  ExternalLink,
+  Globe,
+  Play,
+  Image as ImageIcon,
+  X,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 
 interface OgData {
   url: string;
@@ -31,9 +40,12 @@ export function isDirectImageUrl(url: string): boolean {
     clean.endsWith('.avif') ||
     url.includes('imagedelivery.net') ||
     url.includes('i.imgur.com') ||
+    url.includes('imgur.com') ||
     url.includes('res.cloudinary.com') ||
     url.includes('files.catbox.moe') ||
-    url.includes('i.ibb.co')
+    url.includes('i.ibb.co') ||
+    url.includes('postimg.cc') ||
+    url.includes('pbs.twimg.com')
   );
 }
 
@@ -56,13 +68,156 @@ export function extractYouTubeId(url: string): string | null {
 }
 
 /**
+ * Fullscreen Interactive Lightbox Modal for Cast Images
+ */
+export function ImageLightboxModal({
+  images,
+  initialIndex = 0,
+  onClose,
+}: {
+  images: string[];
+  initialIndex?: number;
+  onClose: () => void;
+}) {
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    setCurrentIndex(initialIndex);
+  }, [initialIndex]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const origOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      } else if (e.key === 'ArrowLeft' && images.length > 1) {
+        setCurrentIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+      } else if (e.key === 'ArrowRight' && images.length > 1) {
+        setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = origOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [images.length, onClose]);
+
+  if (!mounted || typeof document === 'undefined' || images.length === 0) return null;
+
+  const currentUrl = images[currentIndex] || images[0];
+
+  const content = (
+    <div
+      className="fixed inset-0 z-[99999] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 select-none animate-in fade-in duration-200"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      {/* Top action bar */}
+      <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20 pointer-events-none">
+        {/* Counter */}
+        <div className="pointer-events-auto">
+          {images.length > 1 && (
+            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 text-white text-xs font-semibold backdrop-blur-md border border-white/10 shadow-lg">
+              {currentIndex + 1} / {images.length}
+            </span>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <a
+            href={currentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/10"
+            title="Open original image in new tab"
+          >
+            <ExternalLink className="h-5 w-5" />
+          </a>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white hover:text-white transition-all backdrop-blur-md border border-white/10 cursor-pointer"
+            title="Close (Esc)"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Navigation Arrows for multi-image gallery */}
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setCurrentIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+            }}
+            className="absolute left-3 sm:left-6 z-20 p-2.5 rounded-full bg-white/10 hover:bg-white/25 text-white backdrop-blur-md border border-white/10 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            title="Previous image"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+            }}
+            className="absolute right-3 sm:right-6 z-20 p-2.5 rounded-full bg-white/10 hover:bg-white/25 text-white backdrop-blur-md border border-white/10 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            title="Next image"
+          >
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        </>
+      )}
+
+      {/* Main Image View */}
+      <div
+        className="relative max-w-[95vw] sm:max-w-[90vw] max-h-[85vh] sm:max-h-[88vh] flex items-center justify-center overflow-hidden cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img
+          src={currentUrl}
+          alt={`Full view ${currentIndex + 1}`}
+          className="max-w-full max-h-[85vh] sm:max-h-[88vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform duration-200"
+        />
+      </div>
+    </div>
+  );
+
+  return createPortal(content, document.body);
+}
+
+/**
  * Single Rich Link or Media Card
  */
-export function SingleLinkPreview({ url }: { url: string }) {
+export function SingleLinkPreview({
+  url,
+  onImageClick,
+}: {
+  url: string;
+  onImageClick?: (url: string) => void;
+}) {
   const [og, setOg] = useState<OgData | null>(clientOgCache.get(url) || null);
   const [loading, setLoading] = useState<boolean>(!clientOgCache.has(url));
   const [hasError, setHasError] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [isSelfLightboxOpen, setIsSelfLightboxOpen] = useState(false);
 
   const youtubeId = extractYouTubeId(url);
   const isImage = isDirectImageUrl(url);
@@ -142,25 +297,39 @@ export function SingleLinkPreview({ url }: { url: string }) {
     );
   }
 
-  // CASE 3: Direct Image
+  // CASE 3: Direct Image (Click opens fullscreen lightbox)
   if (isImage) {
     if (imgError) return null;
     return (
-      <div
-        className="rounded-2xl overflow-hidden border border-slate-200/90 bg-slate-50 my-2 max-w-2xl group shadow-xs hover:border-purple-300 transition-all cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          window.open(url, '_blank', 'noopener,noreferrer');
-        }}
-      >
-        <img
-          src={url}
-          alt="Cast media"
-          onError={() => setImgError(true)}
-          className="w-full max-h-96 object-contain bg-slate-950/5 group-hover:scale-[1.01] transition-transform duration-200"
-          loading="lazy"
-        />
-      </div>
+      <>
+        <div
+          className="rounded-2xl overflow-hidden border border-slate-200/90 bg-slate-50 my-2 max-w-2xl group shadow-xs hover:border-purple-300 transition-all cursor-zoom-in"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onImageClick) {
+              onImageClick(url);
+            } else {
+              setIsSelfLightboxOpen(true);
+            }
+          }}
+          title="Click to view full image"
+        >
+          <img
+            src={url}
+            alt="Cast media"
+            onError={() => setImgError(true)}
+            className="w-full max-h-96 object-contain bg-slate-950/5 group-hover:scale-[1.01] transition-transform duration-200"
+            loading="lazy"
+          />
+        </div>
+        {isSelfLightboxOpen && !onImageClick && (
+          <ImageLightboxModal
+            images={[url]}
+            initialIndex={0}
+            onClose={() => setIsSelfLightboxOpen(false)}
+          />
+        )}
+      </>
     );
   }
 
@@ -260,6 +429,28 @@ export function CastMediaPreviews({
   embeds?: Array<{ url?: string; castId?: { fid: number; hash: string } }>;
   text?: string;
 }) {
+  const [lightboxState, setLightboxState] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+  });
+
+  const handleOpenLightbox = (images: string[], index: number) => {
+    setLightboxState({
+      isOpen: true,
+      images,
+      initialIndex: index,
+    });
+  };
+
+  const handleCloseLightbox = () => {
+    setLightboxState((prev) => ({ ...prev, isOpen: false }));
+  };
+
   // Extract URLs from embeds
   const embedUrls = (embeds || [])
     .map((e) => e.url)
@@ -291,8 +482,12 @@ export function CastMediaPreviews({
           {directImageUrls.slice(0, 3).map((imgUrl, idx) => (
             <div
               key={idx}
-              className="relative aspect-4/3 cursor-pointer group overflow-hidden rounded-xl bg-slate-100"
-              onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
+              className="relative aspect-4/3 cursor-zoom-in group overflow-hidden rounded-xl bg-slate-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenLightbox(directImageUrls, idx);
+              }}
+              title="Click to view full image"
             >
               <img
                 src={imgUrl}
@@ -304,8 +499,20 @@ export function CastMediaPreviews({
           ))}
         </div>
       ) : directImageUrls.length === 1 ? (
-        <SingleLinkPreview url={directImageUrls[0]} />
+        <SingleLinkPreview
+          url={directImageUrls[0]}
+          onImageClick={(imgUrl) => handleOpenLightbox([imgUrl], 0)}
+        />
       ) : null}
+
+      {/* Lightbox Modal for Gallery or Single Image */}
+      {lightboxState.isOpen && (
+        <ImageLightboxModal
+          images={lightboxState.images}
+          initialIndex={lightboxState.initialIndex}
+          onClose={handleCloseLightbox}
+        />
+      )}
 
       {/* Other URLs (Websites, YouTube, Videos) */}
       {otherUrls.slice(0, 4 - directImageUrls.length).map((url) => (

@@ -31,6 +31,7 @@ import {
   Copy,
   ChevronDown,
   Server,
+  Github,
   Filter,
   Plus,
   Image as ImageIcon,
@@ -1360,7 +1361,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
               autoFocus
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search user proof (@username or FID)..."
+              placeholder="Search Username"
               className="w-full pl-9 pr-8 py-2 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all"
             />
             {isSearching && (
@@ -1439,11 +1440,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                 >
                   <UserCheck className="h-4 w-4" />
                   <span>Following</span>
-                  {session && followedFids.size > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-extrabold">
-                      {followedFids.size}
-                    </span>
-                  )}
                   {feedMode === 'following' && (
                     <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-700 rounded-full" />
                   )}
@@ -2494,7 +2490,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search user proof (@username or FID)..."
+                  placeholder="Search Username"
                   className="w-full pl-9 pr-8 py-2 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-purple-500 transition-all"
                 />
                 {isSearching && (
@@ -2710,16 +2706,66 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
               </div>
             </div>
 
-            {/* Sovereign Protocol Badge */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-2 text-center">
-              <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider block">
-                Sovereign Infrastructure
-              </span>
+            {/* Sovereign Snapchain Infrastructure Card */}
+            <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3 transition-all hover:shadow-sm">
+              {/* Header with Live RPC Indicator */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-purple-50 text-purple-700 ring-1 ring-purple-500/10 shadow-xs">
+                    <Server className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                      Sovereign Snapchain Node
+                    </h3>
+                    <span className="text-[10px] text-slate-400 font-medium block">
+                      Autonomous Read &amp; Write Mesh
+                    </span>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-semibold text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live RPC
+                </span>
+              </div>
+
+              {/* Technical Description Grounded in Ground Truth */}
               <p className="text-xs text-slate-500 leading-relaxed">
-                Running directly against local Snapchain read node. Zero third-party indexing dependency.
+                Direct peer-to-peer connection to a standalone Snapchain read node. Dispatches protocol writes directly via local RPC <code className="text-[10px] font-mono bg-slate-100 text-purple-700 px-1 py-0.5 rounded border border-slate-200">/v1/submitMessage</code> using gasless EIP-712 app signers, with zero centralized API intermediaries.
               </p>
-              <div className="text-[11px] text-slate-400 font-mono pt-1">
-                MIT License • mohammadma98
+
+              {/* Protocol Specs Grid */}
+              <div className="grid grid-cols-2 gap-1.5 pt-0.5 text-[11px]">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2 text-center">
+                  <span className="text-[10px] text-slate-400 font-medium block">App Signers</span>
+                  <span className="font-bold text-slate-700 text-[11px]">Gasless EIP-712</span>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2 text-center">
+                  <span className="text-[10px] text-slate-400 font-medium block">Write Route</span>
+                  <span className="font-bold text-slate-700 text-[11px]">Direct Gossip</span>
+                </div>
+              </div>
+
+              {/* GitHub Link Button */}
+              <a
+                href="https://github.com/mohammadma98/farcaster-snapchain-node-client"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center justify-between rounded-xl bg-slate-900 hover:bg-purple-950 text-white px-3.5 py-2.5 transition-all text-xs font-semibold shadow-xs hover:shadow-md"
+              >
+                <div className="flex items-center gap-2">
+                  <Github className="h-4 w-4 text-purple-300 group-hover:scale-110 transition-transform" />
+                  <span>View Source on GitHub</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono">
+                  <span>MIT</span>
+                  <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                </div>
+              </a>
+
+              {/* Footer Attribution */}
+              <div className="text-[10px] text-slate-400 text-center font-mono pt-0.5">
+                mohammadma98 • Sovereign Web Suite
               </div>
             </div>
           </aside>

@@ -196,7 +196,7 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
                 <Wallet className="h-4 w-4" />
               </div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                Web3 Vault
+                My Wallet
               </h3>
             </div>
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 border border-slate-200">
@@ -240,7 +240,7 @@ export function WalletCard({ session, onOpenAuthModal }: WalletCardProps) {
           <div>
             <div className="flex items-center gap-1.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                Web3 Vault
+                My Wallet
               </h3>
               <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20 animate-pulse" />
             </div>
