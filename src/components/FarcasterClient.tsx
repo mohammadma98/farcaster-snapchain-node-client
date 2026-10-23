@@ -202,6 +202,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [profileCasts, setProfileCasts] = useState<FarcasterCast[]>([]);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isFollowingCurrentProfile, setIsFollowingCurrentProfile] = useState(false);
+  const [hasMoreProfileCasts, setHasMoreProfileCasts] = useState<boolean>(true);
+  const [isLoadingMoreProfileCasts, setIsLoadingMoreProfileCasts] = useState<boolean>(false);
+  const [profileCursor, setProfileCursor] = useState<string | number | undefined>(undefined);
+  const profileObserverTarget = useRef<HTMLDivElement>(null);
 
   // Stable refs for routing and session to prevent cascade re-render loops
   const sessionRef = useRef(session);
@@ -596,32 +600,91 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
-  // 6. Fetch Profile Tab Items (Casts, Replies, Quotes, Recasts, Likes)
+  // 6. Fetch Profile Tab Items (Casts, Replies, Quotes, Recasts, Likes) - 6 items per batch
   const fetchProfileCasts = async (
     fidOrUsername: number | string,
     tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes' = 'casts',
     targetNode = nodeUrl
   ) => {
     setIsLoadingProfileCasts(true);
+    setProfileCursor(undefined);
+    setHasMoreProfileCasts(true);
     try {
       const activeSession = sessionRef.current || session;
       const viewerParam = activeSession?.fid ? `&viewerFid=${activeSession.fid}` : '';
       const castsRes = await fetch(
-        `/api/users/${fidOrUsername}/casts?tab=${tab}&nodeUrl=${encodeURIComponent(targetNode)}${viewerParam}`
+        `/api/users/${fidOrUsername}/casts?tab=${tab}&limit=6&nodeUrl=${encodeURIComponent(targetNode)}${viewerParam}`
       );
       const castsData = await castsRes.json();
       if (Array.isArray(castsData.casts)) {
         setProfileCasts(castsData.casts);
+        setProfileCursor(castsData.nextCursor);
+        setHasMoreProfileCasts(Boolean(castsData.hasMore));
       } else {
         setProfileCasts([]);
+        setProfileCursor(undefined);
+        setHasMoreProfileCasts(false);
       }
     } catch (err) {
       console.error('Error loading profile casts:', err);
       setProfileCasts([]);
+      setProfileCursor(undefined);
+      setHasMoreProfileCasts(false);
     } finally {
       setIsLoadingProfileCasts(false);
     }
   };
+
+  // 6b. Fetch Next Batch of 6 Profile Items (Infinite Scroll)
+  const fetchMoreProfileCasts = useCallback(async () => {
+    if (isLoadingMoreProfileCasts || !hasMoreProfileCasts || !profileCursor || !currentProfile) return;
+    setIsLoadingMoreProfileCasts(true);
+    try {
+      const activeSession = sessionRef.current || session;
+      const viewerParam = activeSession?.fid ? `&viewerFid=${activeSession.fid}` : '';
+      const fidOrUsername = currentProfile.username || currentProfile.fid;
+      const url = `/api/users/${fidOrUsername}/casts?tab=${profileTab}&limit=6&cursor=${encodeURIComponent(String(profileCursor))}&nodeUrl=${encodeURIComponent(nodeUrl)}${viewerParam}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (Array.isArray(data.casts) && data.casts.length > 0) {
+        setProfileCasts((prev) => {
+          const seen = new Set(prev.map((c) => c.hash));
+          const newUnique = data.casts.filter((c: FarcasterCast) => !seen.has(c.hash));
+          if (newUnique.length === 0) {
+            setHasMoreProfileCasts(false);
+            return prev;
+          }
+          return [...prev, ...newUnique];
+        });
+        setProfileCursor(data.nextCursor);
+        setHasMoreProfileCasts(Boolean(data.hasMore));
+      } else {
+        setHasMoreProfileCasts(false);
+      }
+    } catch (err) {
+      console.warn('Error loading more profile casts:', err);
+    } finally {
+      setIsLoadingMoreProfileCasts(false);
+    }
+  }, [isLoadingMoreProfileCasts, hasMoreProfileCasts, profileCursor, currentProfile, profileTab, session?.fid, nodeUrl]);
+
+  // Profile Infinite Scroll IntersectionObserver
+  useEffect(() => {
+    if (activeTab !== 'profile' || !hasMoreProfileCasts || isLoadingMoreProfileCasts || isLoadingProfileCasts) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          fetchMoreProfileCasts();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    const target = profileObserverTarget.current;
+    if (target) observer.observe(target);
+    return () => {
+      if (target) observer.unobserve(target);
+    };
+  }, [activeTab, hasMoreProfileCasts, isLoadingMoreProfileCasts, isLoadingProfileCasts, fetchMoreProfileCasts]);
 
   // 7. Open User Profile
   const handleOpenProfile = async (
@@ -631,6 +694,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   ) => {
     setActiveTab('profile');
     setProfileTab(tab);
+    setProfileCasts([]);
+    setProfileCursor(undefined);
+    setHasMoreProfileCasts(true);
     setIsLoadingProfile(true);
 
     try {
@@ -692,6 +758,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
   const handleSelectProfileTab = (tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes') => {
     setProfileTab(tab);
+    setProfileCasts([]);
+    setProfileCursor(undefined);
+    setHasMoreProfileCasts(true);
     if (currentProfile) {
       const u = currentProfile.username || currentProfile.fid;
       const query = tab !== 'casts' ? `?tab=${tab}` : '';
@@ -2290,11 +2359,6 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           >
                             <Icon className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isActive ? 'text-purple-600' : 'text-slate-400'}`} />
                             <span>{tabItem.label}</span>
-                            {isActive && !isLoadingProfileCasts && (
-                              <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.5 rounded-full font-semibold">
-                                {profileCasts.length}
-                              </span>
-                            )}
                           </button>
                         );
                       })}
@@ -2330,7 +2394,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           </p>
                         </div>
                       ) : (
-                        profileCasts.map((cast) => (
+                        <>
+                          {profileCasts.map((cast) => (
                           <div
                             key={cast.hash}
                             className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3 hover:border-purple-300 transition-all"
@@ -2498,8 +2563,37 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               </button>
                             </div>
                           </div>
-                        ))
-                      )}
+                        ))}
+
+                        {/* Infinite Scroll Sentinel / Load More for Profile */}
+                        {hasMoreProfileCasts && (
+                          <div ref={profileObserverTarget} className="pt-4 pb-2 text-center">
+                            <button
+                              onClick={fetchMoreProfileCasts}
+                              disabled={isLoadingMoreProfileCasts}
+                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-xs transition-all disabled:opacity-60"
+                            >
+                              {isLoadingMoreProfileCasts ? (
+                                <>
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-purple-600" />
+                                  <span>Loading more {profileTab}...</span>
+                                </>
+                              ) : (
+                                <span>Load More (↓)</span>
+                              )}
+                            </button>
+                          </div>
+                        )}
+
+                        {!hasMoreProfileCasts && profileCasts.length > 0 && (
+                          <div className="text-center py-5 text-slate-400 text-xs">
+                            <span className="inline-block px-3 py-1 bg-slate-100 rounded-full font-mono text-[11px]">
+                              End of {profileTab}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
                     </div>
                   </div>
                 ) : null}
