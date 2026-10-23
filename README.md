@@ -32,7 +32,7 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash
 ```
-*Auto-clones repository, builds the isolated Docker container (`farcaster-client`), and launches the sovereign web interface (`http://localhost:3000`) and terminal CLI with **zero host Node.js dependencies**.*
+*Auto-clones repository, builds the isolated Docker container (`farcaster-client`), provisions a zero-config Cloudflare SSL tunnel (`https://*.trycloudflare.com`), and launches the sovereign web interface and terminal CLI with **zero host Node.js dependencies**.*
 
 ---
 
@@ -41,6 +41,7 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 | Feature | Description | Protocol Standard |
 | :--- | :--- | :--- |
 | **Zero API Keys** | Connects directly to local read node via `:3381` (HTTP) and `:3382` (libp2p gossip). No Neynar, Alchemy, or Infura accounts required. | Decentralized P2P Mesh |
+| **Instant HTTPS Domain** | Auto-provisions an ephemeral Cloudflare Quick Tunnel (`trycloudflare.com`) with trusted SSL, allowing instant browser access without manual DNS or port forwarding. | Cloudflare Edge Tunnels |
 | **Gasless Signers** | Generates Ed25519 app keys authorized via off-chain EIP-712 signatures from the custody account. Zero Optimism ETH or gas fees. | Snapchain Engine V16 |
 | **Community Filtering** | Include or exclude casts originating from specific clients (Warpcast, Supercast, Phaver, Herocast) or keywords to curate custom communities. | Client-Neutral Curation |
 | **Read Node Writes** | Directly submits signed binary protobuf messages to `:3381/v1/submitMessage`. Read nodes gossip writes into validator mempools. | Libp2p Mempool Gossip |
@@ -198,11 +199,12 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 # 1. 启动官方 Snapchain 只读节点 (免第三方 API Key，自动将 Grafana 隔离至 3005 端口)
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash
 
-# 2. 自动拉取代码并启动 Web 客户端 (http://localhost:3000) 与 CLI
+# 2. 自动拉取代码并启动 Web 客户端 (支持 Cloudflare 免配置 HTTPS 域名与本地 3000 端口) 与 CLI
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash
 ```
 
 ### 核心特性说明：
+- **即时 HTTPS 域名 (Cloudflare Tunnel)**：自动分配 `trycloudflare.com` 临时公网二级域名并自带受信 SSL 证书，无需配置 DNS 解析或路由器端口映射即可在任何浏览器中安全访问。
 - **只读节点直接处理写入**：向本地 `:3381/v1/submitMessage` 发送 Protobuf 二进制消息，只读节点校验后进入本地内存池，并通过 P2P Libp2p (:3382) 广播至验证者出块。
 - **完全免 Gas 密钥 (Engine V16)**：通过以太坊托管地址对 `KeyAddBody` 进行 EIP-712 链下签名，再由 Ed25519 密钥签名证明持有权 (PoP)，无需向 Optimism 发送交易，零 Gas 费。
 - **客户端中立过滤**：支持一键包含或排除来自 Warpcast、Supercast 等特定客户端的内容，构建纯粹去中心化的自主社区。

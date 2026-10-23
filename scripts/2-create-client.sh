@@ -8,6 +8,7 @@
 # - ZERO global Node.js or npm dependencies required on the host (100% Dockerized)
 # - Connects directly to local Read Node (http://localhost:3381)
 # - No 3rd-party API keys required
+# - Zero-config public HTTPS access via Cloudflare Quick Tunnel (trycloudflare.com)
 # - Imports existing seed phrase safely (gasless EIP-712 app key)
 # - Reads feed, posts casts, reacts, follows, searches users
 # - Modern light-theme interface matching farcaster.xyz
@@ -94,8 +95,8 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}Preparing port 3000 and container environment...${NC}"
 
-# Stop any previous farcaster-client and farcaster-feed-worker containers
-$DOCKER_BIN rm -f farcaster-client farcaster-feed-worker > /dev/null 2>&1 || true
+# Stop any previous farcaster-client, farcaster-feed-worker, and farcaster-tunnel containers
+$DOCKER_BIN rm -f farcaster-client farcaster-feed-worker farcaster-tunnel > /dev/null 2>&1 || true
 
 # Kill any stale host processes on port 3000 if present
 if command -v fuser &> /dev/null; then
@@ -251,20 +252,68 @@ else
     done
     echo ""
 
+    # ------------------------------------------------------------------------------
+    # 5.5 Provision Zero-Config Cloudflare Quick Tunnel (HTTPS / SSL Subdomain)
+    # ------------------------------------------------------------------------------
+    echo -e "\n${CYAN}${BOLD}Provisioning Cloudflare Quick Tunnel (trycloudflare.com with SSL)...${NC}"
+    $DOCKER_BIN rm -f farcaster-tunnel > /dev/null 2>&1 || true
+
+    TUNNEL_TARGET="http://127.0.0.1:3000"
+    TUNNEL_NET_ARGS="--network host"
+    if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
+        TUNNEL_NET_ARGS="--add-host=host.docker.internal:host-gateway"
+        TUNNEL_TARGET="http://host.docker.internal:3000"
+    fi
+
+    $DOCKER_BIN run -d \
+        --name farcaster-tunnel \
+        --restart unless-stopped \
+        $TUNNEL_NET_ARGS \
+        cloudflare/cloudflared:latest tunnel --no-autoupdate --url "$TUNNEL_TARGET" > /dev/null 2>&1 || true
+
+    echo -e "  Assigning secure public HTTPS domain via Cloudflare Edge..."
+    CLOUDFLARE_URL=""
+    WAIT_TUNNEL=0
+    while [ "$WAIT_TUNNEL" -lt 20 ]; do
+        CLOUDFLARE_URL=$($DOCKER_BIN logs farcaster-tunnel 2>&1 | grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' | head -n 1 || true)
+        if [ -n "$CLOUDFLARE_URL" ]; then
+            break
+        fi
+        sleep 1
+        WAIT_TUNNEL=$(( WAIT_TUNNEL + 1 ))
+        printf "."
+    done
+    echo ""
+
+    if [ -n "$CLOUDFLARE_URL" ]; then
+        echo -e "  ${GREEN}✓ Cloudflare SSL Tunnel established:${NC} ${BOLD}${CYAN}${CLOUDFLARE_URL}${NC}"
+        echo "$CLOUDFLARE_URL" > "${TARGET_DIR}/.tunnel_url" 2>/dev/null || true
+    else
+        echo -e "  ${YELLOW}Notice: Cloudflare tunnel URL did not resolve immediately. Falling back to direct IP.${NC}"
+    fi
+
     echo -e "\n${GREEN}${BOLD}================================================================${NC}"
     echo -e "${GREEN}${BOLD}  ✓ Sovereign Farcaster Client Container is LIVE!               ${NC}"
     echo -e "${GREEN}${BOLD}================================================================${NC}"
-    echo -e "  - Web Client URL:  ${BOLD}${CYAN}http://${PUBLIC_IP}:3000${NC}"
-    echo -e "  - Local Host URL:  ${BOLD}http://localhost:3000${NC}"
-    echo -e "  - REST API Feed:   ${BOLD}http://${PUBLIC_IP}:3000/api/feed${NC}"
-    echo -e "  - Feed Indexer:    ${BOLD}farcaster-feed-worker (Live Event Stream, 25,000-cast FIFO eviction)${NC}"
-    echo -e "  - Target Node RPC: ${BOLD}${READ_NODE_URL}${NC}"
-    echo -e "  - Postgres Engine: ${BOLD}farcaster-postgres (512MB RAM cap, Volume: farcaster-pgdata)${NC}"
-    echo -e "  - Container Name:  ${BOLD}farcaster-client${NC} (Status: Running)"
-    echo -e "  - Commit Build:    ${BOLD}${COMMIT_HASH}${NC}"
+    if [ -n "$CLOUDFLARE_URL" ]; then
+        echo -e "  - Public HTTPS URL: ${BOLD}${GREEN}${CLOUDFLARE_URL}${NC} (Cloudflare SSL Domain)"
+        echo -e "  - Direct Server IP: ${BOLD}http://${PUBLIC_IP}:3000${NC}"
+        echo -e "  - REST API Feed:    ${BOLD}${CLOUDFLARE_URL}/api/feed${NC}"
+    else
+        echo -e "  - Web Client URL:   ${BOLD}${CYAN}http://${PUBLIC_IP}:3000${NC}"
+        echo -e "  - REST API Feed:    ${BOLD}http://${PUBLIC_IP}:3000/api/feed${NC}"
+    fi
+    echo -e "  - Local Host URL:   ${BOLD}http://localhost:3000${NC}"
+    echo -e "  - Feed Indexer:     ${BOLD}farcaster-feed-worker (Live Event Stream, 25,000-cast FIFO eviction)${NC}"
+    echo -e "  - Target Node RPC:  ${BOLD}${READ_NODE_URL}${NC}"
+    echo -e "  - Postgres Engine:  ${BOLD}farcaster-postgres (512MB RAM cap, Volume: farcaster-pgdata)${NC}"
+    echo -e "  - Client Container: ${BOLD}farcaster-client${NC} (Status: Running)"
+    echo -e "  - Tunnel Container: ${BOLD}farcaster-tunnel${NC} (Status: Running)"
+    echo -e "  - Commit Build:     ${BOLD}${COMMIT_HASH}${NC}"
     echo -e "${GREEN}${BOLD}================================================================${NC}\n"
-    echo -e "To view client container logs:  ${BOLD}${DOCKER_BIN} logs -f farcaster-client${NC}"
+    echo -e "To view web client logs:        ${BOLD}${DOCKER_BIN} logs -f farcaster-client${NC}"
+    echo -e "To view tunnel logs / URL:      ${BOLD}${DOCKER_BIN} logs -f farcaster-tunnel${NC}"
     echo -e "To view feed worker logs:       ${BOLD}${DOCKER_BIN} logs -f farcaster-feed-worker${NC}"
-    echo -e "To restart client container:    ${BOLD}${DOCKER_BIN} restart farcaster-client farcaster-feed-worker${NC}"
-    echo -e "To stop all suite containers:   ${BOLD}${DOCKER_BIN} stop farcaster-client farcaster-feed-worker farcaster-postgres${NC}\n"
+    echo -e "To restart all client services: ${BOLD}${DOCKER_BIN} restart farcaster-client farcaster-tunnel farcaster-feed-worker${NC}"
+    echo -e "To stop all suite containers:   ${BOLD}${DOCKER_BIN} stop farcaster-client farcaster-tunnel farcaster-feed-worker farcaster-postgres${NC}\n"
 fi
