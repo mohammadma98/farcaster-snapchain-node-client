@@ -1,7 +1,7 @@
 # 🟣 Farcaster Snapchain Read Node & Sovereign Client Suite
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-emerald.svg)](https://nodejs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Snapchain](https://img.shields.io/badge/Snapchain-Engine%20V16-blue.svg)](https://github.com/farcasterxyz/snapchain)
 [![Language](https://img.shields.io/badge/Bilingual-EN%20%7C%20%E4%B8%AD%E6%96%87-cyan.svg)](https://github.com/mohammadma98/farcaster-snapchain-node-client)
 [![Network](https://img.shields.io/badge/Network-Mainnet%20Ready-success.svg)](https://snapchain.farcaster.xyz)
@@ -32,7 +32,7 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 ```bash
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash
 ```
-*Auto-clones repository, installs dependencies, verifies protocol cryptography, and launches the web interface (`http://localhost:3000`) and terminal CLI.*
+*Auto-clones repository, builds the isolated Docker container (`farcaster-client`), and launches the sovereign web interface (`http://localhost:3000`) and terminal CLI with **zero host Node.js dependencies**.*
 
 ---
 
@@ -101,7 +101,7 @@ App keys (signers) are authorized without blockchain transactions:
 
 ## 💻 CLI Client Reference
 
-The suite includes an interactive command-line interface communicating directly with the read node:
+The suite includes an interactive command-line interface communicating directly with the read node (runnable directly or inside Docker with `./scripts/2-create-client.sh cli`):
 
 ```bash
 # Check node status and peer count
