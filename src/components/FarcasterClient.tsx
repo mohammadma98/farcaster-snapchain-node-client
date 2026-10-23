@@ -948,18 +948,17 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       setComposeText('');
       setQuoteCast(null);
-      showToast('Cast published to Snapchain mempool!');
+      showToast('پیام در مم‌پول نود ثبت شد؛ پس از تایید در بلاک اسنپ‌چین و ایندکس توسط ورکر در فید نمایش داده می‌شود.');
 
-      // Add to feed immediately
-      if (data.cast) {
-        setCasts((prev) => [data.cast, ...prev]);
-      }
+      // Trigger feed refresh after 3.5s so the event indexed into PostgreSQL by the FeedWorker becomes visible
+      setTimeout(() => {
+        fetchFeed(sourceFilter, feedMode, session.fid);
+      }, 3500);
     } catch (err: any) {
-      if (err.message?.includes('invalid signer')) {
-        showToast('Signer session expired or node restarted. Please log in again to renew your gasless key.');
+      const msg = err.message || 'خطا در ارسال کست به نود';
+      showToast(msg);
+      if (msg.includes('invalid signer') && !msg.includes('عقب') && !msg.includes('lagging')) {
         setIsAuthModalOpen(true);
-      } else {
-        showToast(`Publication notice: ${err.message}`);
       }
     } finally {
       setIsPublishing(false);
@@ -994,17 +993,20 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
       const data = await res.json();
       if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.error || 'Failed to post reply');
+        throw new Error(data.error || 'خطا در ارسال پاسخ به نود');
       }
 
       setReplyText('');
-      showToast('Reply published to thread!');
+      showToast('پاسخ در مم‌پول نود ثبت شد؛ پس از تایید در بلاک در ترد نمایش داده می‌شود.');
 
-      if (data.cast) {
-        setThreadReplies((prev) => [...prev, data.cast]);
-      }
+      // Trigger thread refresh after 3.5s
+      setTimeout(() => {
+        if (currentThreadCast) {
+          handleOpenThread(currentThreadCast.hash, currentThreadCast.author?.username, false);
+        }
+      }, 3500);
     } catch (err: any) {
-      showToast(`Reply notice: ${err.message}`);
+      showToast(err.message || 'خطا در ارسال پاسخ');
     } finally {
       setIsPublishingReply(false);
     }

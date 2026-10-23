@@ -6,6 +6,7 @@ import {
   FarcasterNetwork,
   getFarcasterTime,
   Message,
+  bytesToHexString,
 } from '@farcaster/core';
 import { toAccount } from 'viem/accounts';
 import {
@@ -153,30 +154,23 @@ export class GaslessSignerManager {
   }
 
   /**
-   * Submit the encoded KEY_ADD message to the local node with resilient
-   * network coordinator broadcast to guarantee validator mempool ingestion.
+   * Submit the encoded KEY_ADD message strictly to the internal node.
+   * If the initial attempt fails, waits 5 seconds and retries ONCE.
    */
   static async submitKeyAddToNode(
     nodeUrl: string,
     encodedBytes: Uint8Array
   ): Promise<{ success: boolean; hash?: string; error?: string }> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
     const bufferPayload = Buffer.from(
       encodedBytes.buffer,
       encodedBytes.byteOffset,
       encodedBytes.byteLength
     );
 
-    const targetUrls = [
-      nodeUrl.replace(/\/$/, ''),
-      'https://iris.farcaster.xyz:3381',
-    ];
-
-    let lastError = '';
-    let successHash: string | undefined;
-
-    for (const url of targetUrls) {
+    const executePost = async (): Promise<{ ok: boolean; status: number; text: string; hash?: string }> => {
       try {
-        const response = await fetch(`${url}/v1/submitMessage`, {
+        const response = await fetch(`${cleanUrl}/v1/submitMessage`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
@@ -188,24 +182,45 @@ export class GaslessSignerManager {
 
         if (response.ok) {
           const result = await response.json().catch(() => ({}));
-          successHash = result.hash || successHash;
-          // Successfully ingested into mempool
-        } else {
-          const text = await response.text();
-          lastError = `Node ${url} rejected KEY_ADD (${response.status}): ${text}`;
+          const hash = result.hash
+            ? typeof result.hash === 'string'
+              ? result.hash
+              : bytesToHexString(result.hash)._unsafeUnwrap()
+            : undefined;
+
+          return { ok: true, status: response.status, text: '', hash };
         }
+
+        const text = await response.text();
+        return { ok: false, status: response.status, text };
       } catch (err: any) {
-        lastError = err.message || `Failed to submit KEY_ADD to ${url}`;
+        return { ok: false, status: 0, text: err.message || 'Connection failed' };
       }
+    };
+
+    // First attempt to internal node
+    let attempt = await executePost();
+    if (attempt.ok) {
+      return { success: true, hash: attempt.hash };
     }
 
-    if (successHash) {
-      return { success: true, hash: successHash };
+    // Initial failure: Wait 5 seconds and retry ONCE to internal node
+    console.warn(`[GaslessSigner] Initial key submission to ${cleanUrl} failed (${attempt.status}: ${attempt.text}). Retrying in 5 seconds...`);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    attempt = await executePost();
+    if (attempt.ok) {
+      return { success: true, hash: attempt.hash };
+    }
+
+    let errorMsg = `Internal node (${cleanUrl}) rejected KEY_ADD registration (${attempt.status}): ${attempt.text}`;
+    if (attempt.status === 0) {
+      errorMsg = `Internal node (${cleanUrl}) unreachable during KEY_ADD registration: ${attempt.text}`;
     }
 
     return {
       success: false,
-      error: lastError || 'Failed to broadcast KEY_ADD to network validators',
+      error: errorMsg,
     };
   }
 }

@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { defaultNodeClient } from '@/lib/farcaster/node-client';
-import { feedStore } from '@/lib/farcaster/feed-store';
-import { FarcasterCast } from '@/lib/farcaster/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,60 +42,15 @@ export async function POST(request: Request) {
 
     const hash = nodeResult.hash || '0x...';
 
-    // 2. Fetch author profile
-    const authorUser = await feedStore.getUser(fid, targetNodeUrl);
-
-    // 3. Create Cast object
-    const newCast: FarcasterCast = {
-      hash,
-      fid,
-      text: text.trim(),
-      timestamp: Date.now(),
-      author: authorUser
-        ? {
-            fid: authorUser.fid,
-            username: authorUser.username,
-            displayName: authorUser.displayName,
-            pfpUrl: authorUser.pfpUrl,
-          }
-        : {
-            fid,
-            username: `user_${fid}`,
-            displayName: `FID ${fid}`,
-          },
-      parentCastId,
-      embeds,
-      clientSource: 'Direct Snapchain',
-      reactions: {
-        likesCount: 0,
-        recastsCount: 0,
-        likedByMe: false,
-        recastByMe: false,
-      },
-      repliesCount: 0,
-    };
-
-    // 4. Store in local registry so it immediately appears in all feeds & threads
-    feedStore.addCast(newCast);
-
-    // 5. Persist to PostgreSQL if available
-    try {
-      const { isPostgresAvailable } = await import('@/lib/db/pool');
-      const hasDb = await isPostgresAvailable();
-      if (hasDb) {
-        const { CastRepository } = await import('@/lib/db/repositories');
-        CastRepository.upsertCast(newCast).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-
+    // Note: Cast is strictly NOT stored directly into feedStore cache or PostgreSQL here.
+    // Persistence is handled exclusively by the background FeedWorker upon receiving
+    // the canonical on-chain merge event from the internal node's event stream.
     return NextResponse.json({
       status: 'ok',
       success: true,
       hash,
-      cast: newCast,
       nodeGossipStatus: 'ACCEPTED_MEMPOOL',
+      message: 'Cast accepted by internal node mempool. It will be indexed into PostgreSQL via the event worker once confirmed on-chain.',
     });
   } catch (err: any) {
     return NextResponse.json(

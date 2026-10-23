@@ -982,13 +982,9 @@ export class SnapchainNodeClient {
   }
 
   /**
-   * Submit raw protobuf bytes to the node's /v1/submitMessage
-   * Uses 25-second timeout and Buffer payload for rock-solid Node.js binary transmission.
-   */
-  /**
-   * Submit raw protobuf bytes to the node's /v1/submitMessage
-   * Employs local read-node submission with resilient network coordinator fallback
-   * to guarantee uninterrupted message ingestion even when the local read node is catching up on historical sync.
+   * Submit raw protobuf bytes strictly to the internal node's /v1/submitMessage.
+   * If the initial attempt fails, waits 5 seconds and retries ONCE to the internal node.
+   * If it fails again, returns a detailed explanation of the issue (e.g. node sync lag or unreachable).
    */
   private async submitMessageProtobuf(
     encodedBytes: Uint8Array,
@@ -1001,25 +997,16 @@ export class SnapchainNodeClient {
       encodedBytes.byteLength
     );
 
-    // Primary target: local read node
-    // Secondary target: canonical network validator coordinator
-    const targetNodes = [cleanUrl];
-    if (cleanUrl !== 'https://iris.farcaster.xyz:3381' && cleanUrl !== 'http://iris.farcaster.xyz:3381') {
-      targetNodes.push('https://iris.farcaster.xyz:3381');
-    }
-
-    let lastError = '';
-
-    for (const target of targetNodes) {
+    const executePost = async (): Promise<{ ok: boolean; status: number; text: string; hash?: string }> => {
       try {
-        const response = await fetch(`${target}/v1/submitMessage`, {
+        const response = await fetch(`${cleanUrl}/v1/submitMessage`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
             'Content-Length': String(bufferPayload.length),
           },
           body: bufferPayload as any,
-          signal: AbortSignal.timeout(20000), // 20s timeout
+          signal: AbortSignal.timeout(15000),
         });
 
         if (response.ok) {
@@ -1030,24 +1017,48 @@ export class SnapchainNodeClient {
               : bytesToHexString(result.hash)._unsafeUnwrap()
             : undefined;
 
-          return { success: true, hash };
+          return { ok: true, status: response.status, text: '', hash };
         }
 
         const text = await response.text();
-        lastError = `Snapchain node (${target}) rejected message (${response.status}): ${text}`;
-
-        // If error is not a signer/sync error (e.g. malformed payload), don't bother falling back
-        if (!text.includes('invalid signer') && !text.includes('validation_failure') && response.status !== 502 && response.status !== 503) {
-          return { success: false, error: lastError };
-        }
+        return { ok: false, status: response.status, text };
       } catch (err: any) {
-        lastError = err.message || `Error submitting to ${target}`;
+        return { ok: false, status: 0, text: err.message || 'Network request failed' };
       }
+    };
+
+    // First attempt to internal node
+    let attempt = await executePost();
+    if (attempt.ok) {
+      return { success: true, hash: attempt.hash };
+    }
+
+    // Initial failure: Wait 5 seconds and retry ONCE to internal node
+    console.warn(`[NodeClient] Initial submitMessage to ${cleanUrl} failed (${attempt.status}: ${attempt.text}). Retrying in 5 seconds...`);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    attempt = await executePost();
+    if (attempt.ok) {
+      return { success: true, hash: attempt.hash };
+    }
+
+    // Detailed error interpretation for client UI
+    let userFriendlyError = '';
+    const errText = attempt.text.toLowerCase();
+
+    if (attempt.status === 0) {
+      userFriendlyError = `عدم امکان برقراری ارتباط با نود داخلی (${cleanUrl}): اتصال برقرار نشد یا زمان پاسخ منقضی شد. (${attempt.text})`;
+    } else if (errText.includes('invalid signer') || errText.includes('validation_failure')) {
+      userFriendlyError = `خطای اعتبارسنجی در نود داخلی: احتمالاً نود از شبکه عقب است یا رویداد ثبت کلید ساینر را پردازش نکرده است (${attempt.text})`;
+    } else if (attempt.status === 502 || attempt.status === 503) {
+      userFriendlyError = `نود داخلی موقتاً در دسترس نیست (HTTP ${attempt.status}). نود ممکن است در حال همگام‌سازی یا لود بلاک‌ها باشد.`;
+    } else {
+      userFriendlyError = `نود داخلی ارسال پیام را رد کرد (${attempt.status}): ${attempt.text}`;
     }
 
     return {
       success: false,
-      error: lastError || 'All node endpoints rejected the message submission',
+      error: userFriendlyError,
     };
   }
 }

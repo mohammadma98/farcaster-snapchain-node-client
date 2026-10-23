@@ -257,39 +257,20 @@ export function ClientApp({ lang }: ClientAppProps) {
         nodeUrl
       );
 
-      const castHash =
-        result.hash ||
-        '0x' + Array.from({ length: 20 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+      if (!result.success) {
+        throw new Error(result.error || 'Node mempool rejected cast submission');
+      }
 
-      const newCast: FarcasterCast = {
-        hash: castHash,
-        fid: userToUse.fid,
-        text: castText,
-        timestamp: Date.now(),
-        author: {
-          fid: userToUse.fid,
-          username: userToUse.username,
-          displayName: userToUse.displayName,
-          pfpUrl: userToUse.pfpUrl,
-        },
-        parentCastId: replyToCast ? { fid: replyToCast.fid, hash: replyToCast.hash } : undefined,
-        embeds: quoteCast ? [{ castId: { fid: quoteCast.fid, hash: quoteCast.hash } }] : undefined,
-        clientSource: 'Direct Snapchain',
-        reactions: { likesCount: 0, recastsCount: 0, likedByMe: false, recastByMe: false },
-      };
+      const castHash = result.hash || '0x...';
 
-      setCasts(prev => [newCast, ...prev]);
       setCastText('');
       setReplyToCast(null);
       setQuoteCast(null);
-      setPostSuccessHash(
-        result.success
-          ? `${castHash} (Accepted by Node Mempool)`
-          : `${castHash} (Signed via Ed25519 • Local mempool queue)`
-      );
+      setPostSuccessHash(`${castHash} (Accepted by Node Mempool)`);
       setTimeout(() => setPostSuccessHash(null), 6000);
     } catch (err: any) {
       console.warn('Cast publishing notice:', err);
+      alert(err.message || 'Error publishing cast');
     } finally {
       setIsPublishing(false);
     }
