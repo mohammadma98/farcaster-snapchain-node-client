@@ -134,3 +134,40 @@ export interface ClientFilterConfig {
   selectedClients: string[]; // e.g. ['Warpcast', 'Supercast', 'Phaver', 'Herocast']
   keywordFilters: string[];
 }
+
+/**
+ * Check if a cast is a reply to another cast.
+ * Top-level / root casts have no parent cast.
+ */
+export function isReplyCast(cast?: Partial<FarcasterCast> | null): boolean {
+  if (!cast) return false;
+  const rawParentHash = (cast as any).parent_hash || (cast as any).parentHash;
+  if (rawParentHash && rawParentHash !== '0x' && String(rawParentHash).trim() !== '') {
+    return true;
+  }
+  if (cast.parentCastId) {
+    const h = cast.parentCastId.hash;
+    const f = cast.parentCastId.fid;
+    if (h && h !== '0x' && String(h).trim() !== '') return true;
+    if (f && Number(f) > 0) return true;
+  }
+  const rawSnake = (cast as any).parent_cast_id;
+  if (rawSnake) {
+    const h = rawSnake.hash;
+    const f = rawSnake.fid;
+    if (h && h !== '0x' && String(h).trim() !== '') return true;
+    if (f && Number(f) > 0) return true;
+  }
+  if (cast.parentUrl && (cast.parentUrl.startsWith('farcaster://casts/') || cast.parentUrl.includes('/0x'))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a cast is a root / top-level cast (not a reply)
+ */
+export function isRootCast(cast?: Partial<FarcasterCast> | null): boolean {
+  return !isReplyCast(cast);
+}
+

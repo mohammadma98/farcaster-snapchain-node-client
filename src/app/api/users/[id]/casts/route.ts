@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { feedStore } from '@/lib/farcaster/feed-store';
 import { defaultNodeClient } from '@/lib/farcaster/node-client';
-import { FarcasterCast } from '@/lib/farcaster/types';
+import { FarcasterCast, isReplyCast, isRootCast } from '@/lib/farcaster/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -139,8 +139,7 @@ export async function GET(
       const map = new Map<string, FarcasterCast>();
 
       for (const c of [...localReplies, ...allNodeCasts]) {
-        const isReply = Boolean(c.parentCastId?.hash || (c.parentCastId?.fid && c.parentCastId.fid > 0));
-        if (isReply) {
+        if (isReplyCast(c)) {
           if (!c.author) {
             c.author = {
               fid: user.fid,
@@ -185,8 +184,7 @@ export async function GET(
       const map = new Map<string, FarcasterCast>();
 
       for (const c of [...localCasts, ...allNodeCasts]) {
-        const isReply = Boolean(c.parentCastId?.hash || (c.parentCastId?.fid && c.parentCastId.fid > 0));
-        if (!isReply) {
+        if (isRootCast(c)) {
           if (!c.author) {
             c.author = {
               fid: user.fid,

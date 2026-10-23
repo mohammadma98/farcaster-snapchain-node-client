@@ -35,6 +35,21 @@ export function extractSignerHex(rawSigner: any): string | undefined {
   return undefined;
 }
 
+export function parseParentCastId(castBody: any): { fid: number; hash: string } | undefined {
+  if (!castBody) return undefined;
+  const p = castBody.parentCastId || castBody.parent_cast_id;
+  if (!p) return undefined;
+  const fid = typeof p.fid === 'number' ? p.fid : Number(p.fid);
+  const hash = typeof p.hash === 'string' ? p.hash : undefined;
+  if ((fid && fid > 0) || (hash && hash !== '0x' && hash.trim() !== '')) {
+    return {
+      fid: fid || 0,
+      hash: hash || '0x',
+    };
+  }
+  return undefined;
+}
+
 const ID_REGISTRY_ADDRESS = '0x00000000fc6c5f01fc30151999387bb99a9f489b';
 const ID_REGISTRY_ABI = [
   {
@@ -458,8 +473,8 @@ export class SnapchainNodeClient {
               url: e.url,
               castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
             })),
-            parentUrl: castBody.parentUrl,
-            parentCastId: castBody.parentCastId,
+            parentUrl: castBody.parentUrl || castBody.parent_url,
+            parentCastId: parseParentCastId(castBody),
             mentions: castBody.mentions,
             reactions: {
               likesCount: 0,
@@ -711,8 +726,8 @@ export class SnapchainNodeClient {
             url: e.url,
             castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
           })),
-          parentUrl: castBody.parentUrl,
-          parentCastId: castBody.parentCastId,
+          parentUrl: castBody.parentUrl || castBody.parent_url,
+          parentCastId: parseParentCastId(castBody),
           mentions: castBody.mentions,
         };
 
@@ -787,8 +802,8 @@ export class SnapchainNodeClient {
               url: e.url,
               castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
             })),
-            parentUrl: castBody.parentUrl,
-            parentCastId: castBody.parentCastId,
+            parentUrl: castBody.parentUrl || castBody.parent_url,
+            parentCastId: parseParentCastId(castBody),
             mentions: castBody.mentions,
             reactions: {
               likesCount: 0,

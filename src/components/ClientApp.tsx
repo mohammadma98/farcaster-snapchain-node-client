@@ -30,7 +30,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { Language, translations } from '../lib/translations';
-import { FarcasterCast, ClientFilterConfig } from '../lib/farcaster/types';
+import { FarcasterCast, ClientFilterConfig, isRootCast } from '../lib/farcaster/types';
 import { identifyCastClient, applyClientFilter } from '../lib/farcaster/client-filter';
 import { GaslessSignerManager } from '../lib/farcaster/gasless-signer';
 import { defaultNodeClient } from '../lib/farcaster/node-client';
@@ -350,7 +350,7 @@ export function ClientApp({ lang }: ClientAppProps) {
     try {
       const realCasts = await defaultNodeClient.getCastsByFid(fidNum, 30, nodeUrl);
       if (realCasts && realCasts.length > 0) {
-        setCasts(realCasts);
+        setCasts(realCasts.filter(isRootCast));
       }
     } catch {
       // Keep existing casts
@@ -396,7 +396,8 @@ export function ClientApp({ lang }: ClientAppProps) {
 
   // Apply Client Filtering
   const keywords = keywordFilter.split(',').map(s => s.trim()).filter(Boolean);
-  const { filtered, stats } = applyClientFilter(casts, {
+  const rootOnlyCasts = casts.filter(isRootCast);
+  const { filtered, stats } = applyClientFilter(rootOnlyCasts, {
     mode: filterMode,
     selectedClients,
     keywordFilters: keywords,
@@ -704,11 +705,6 @@ export function ClientApp({ lang }: ClientAppProps) {
                               </button>
                             )}
                           </div>
-                          {cast.parentCastId && (
-                            <span className="text-[11px] text-purple-300/60 block">
-                              Replying to <span className="font-mono">FID {cast.parentCastId.fid}</span>
-                            </span>
-                          )}
                         </div>
                       </div>
 

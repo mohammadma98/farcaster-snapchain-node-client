@@ -105,8 +105,10 @@ export class CastRepository {
   static async upsertCast(cast: FarcasterCast): Promise<void> {
     if (!cast.hash || !cast.fid) return;
     const pool = getDatabasePool();
-    const parentHash = cast.parentCastId?.hash || null;
-    const parentFid = cast.parentCastId?.fid || null;
+    const rawHash = cast.parentCastId?.hash || (cast as any).parent_hash || (cast as any).parent_cast_id?.hash;
+    const parentHash = rawHash && rawHash !== '0x' && String(rawHash).trim() !== '' ? rawHash : null;
+    const rawFid = cast.parentCastId?.fid || (cast as any).parent_fid || (cast as any).parent_cast_id?.fid;
+    const parentFid = rawFid && Number(rawFid) > 0 ? Number(rawFid) : null;
 
     await pool.query(
       `
@@ -117,6 +119,8 @@ export class CastRepository {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
       ON CONFLICT (hash) DO UPDATE SET
         text = EXCLUDED.text,
+        parent_hash = COALESCE(EXCLUDED.parent_hash, casts.parent_hash),
+        parent_fid = COALESCE(EXCLUDED.parent_fid, casts.parent_fid),
         embeds = COALESCE(EXCLUDED.embeds, casts.embeds),
         client_source = COALESCE(EXCLUDED.client_source, casts.client_source),
         signer = COALESCE(EXCLUDED.signer, casts.signer),
@@ -257,7 +261,7 @@ export class CastRepository {
       LEFT JOIN cast_stats cs ON cs.cast_hash = c.hash
     `;
 
-    const whereClauses: string[] = ['c.parent_hash IS NULL'];
+    const whereClauses: string[] = ["(c.parent_hash IS NULL OR c.parent_hash = '' OR c.parent_hash = '0x')"];
 
     if (options.fid) {
       whereClauses.push(`c.fid = $${idx}`);

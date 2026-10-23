@@ -3,7 +3,7 @@ import { identifyCastClient, applyClientFilter } from '../src/lib/farcaster/clie
 import { GaslessSignerManager } from '../src/lib/farcaster/gasless-signer';
 import { generateCustodyAccount, deriveCustodyFromMnemonic, generateDevMnemonic, validateMnemonic } from '../src/lib/farcaster/crypto';
 import { feedStore } from '../src/lib/farcaster/feed-store';
-import { FarcasterCast } from '../src/lib/farcaster/types';
+import { FarcasterCast, isReplyCast, isRootCast } from '../src/lib/farcaster/types';
 
 async function runTests() {
   console.log('--- 1. Testing Client Identification ---');
@@ -165,6 +165,58 @@ async function runTests() {
     throw new Error('Truncated text exceeds 768 characters limit');
   }
   console.log(`Verified cast truncation logic: Original length = ${longText.length}, Truncated length = ${truncatedText.length} <= ${MAX_LIMIT}`);
+
+  console.log('\n--- 9. Testing Feed Exclusion of Reply Casts ---');
+  const rootCast: FarcasterCast = {
+    hash: '0xroot1',
+    fid: 3,
+    text: 'A top level root cast for global and following feed',
+    timestamp: Date.now(),
+  };
+
+  const replyCast1: FarcasterCast = {
+    hash: '0xreply1',
+    fid: 3,
+    text: 'A reply cast with parentCastId',
+    timestamp: Date.now(),
+    parentCastId: { fid: 37, hash: '0xbalaji1' },
+  };
+
+  const replyCast2: any = {
+    hash: '0xreply2',
+    fid: 99,
+    text: 'A reply cast with parent_hash',
+    timestamp: Date.now(),
+    parent_hash: '0xroot1',
+  };
+
+  const replyCast3: any = {
+    hash: '0xreply3',
+    fid: 12,
+    text: 'A reply cast with snake_case parent_cast_id',
+    timestamp: Date.now(),
+    parent_cast_id: { fid: 99, hash: '0xother' },
+  };
+
+  if (!isRootCast(rootCast) || isReplyCast(rootCast)) {
+    throw new Error('Root cast was incorrectly identified as a reply');
+  }
+  if (!isReplyCast(replyCast1) || isRootCast(replyCast1)) {
+    throw new Error('replyCast1 was not identified as a reply');
+  }
+  if (!isReplyCast(replyCast2) || isRootCast(replyCast2)) {
+    throw new Error('replyCast2 was not identified as a reply');
+  }
+  if (!isReplyCast(replyCast3) || isRootCast(replyCast3)) {
+    throw new Error('replyCast3 was not identified as a reply');
+  }
+
+  const mixedFeed = [rootCast, replyCast1, replyCast2, replyCast3];
+  const feedFiltered = mixedFeed.filter(isRootCast);
+  if (feedFiltered.length !== 1 || feedFiltered[0].hash !== '0xroot1') {
+    throw new Error(`Feed filtering failed! Expected 1 root cast, got ${feedFiltered.length}`);
+  }
+  console.log(`Verified feed exclusion: Filtered 4 mixed casts -> ${feedFiltered.length} root cast(s) strictly displayed.`);
 
   console.log('\n✓ All protocol unit tests PASSED successfully!');
 }

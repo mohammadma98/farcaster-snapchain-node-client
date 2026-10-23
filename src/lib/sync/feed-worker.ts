@@ -4,7 +4,7 @@ import { CastRepository, UserRepository, CheckpointRepository } from '../db/repo
 import { FarcasterCast, FarcasterUser } from '../farcaster/types';
 import { identifyCastClient } from '../farcaster/client-filter';
 import { SignerAttributionService } from '../farcaster/attribution';
-import { extractSignerHex } from '../farcaster/node-client';
+import { extractSignerHex, parseParentCastId } from '../farcaster/node-client';
 
 const FARCASTER_EPOCH = 1609459200000;
 const ADVISORY_LOCK_ID = 424242;
@@ -289,14 +289,12 @@ export class FeedWorker {
         timestamp,
         author,
         signer: signerHex,
-        parentCastId: castBody.parentCastId
-          ? { fid: castBody.parentCastId.fid, hash: castBody.parentCastId.hash }
-          : undefined,
+        parentCastId: parseParentCastId(castBody),
         embeds: (castBody.embeds || []).map((e: any) => ({
           url: e.url,
           castId: e.castId ? { fid: e.castId.fid, hash: e.castId.hash } : undefined,
         })),
-        parentUrl: castBody.parentUrl,
+        parentUrl: castBody.parentUrl || castBody.parent_url,
         mentions: castBody.mentions,
       };
 

@@ -1,4 +1,4 @@
-import { FarcasterCast, FarcasterUser } from './types';
+import { FarcasterCast, FarcasterUser, isRootCast } from './types';
 import { defaultNodeClient } from './node-client';
 
 /**
@@ -321,8 +321,8 @@ class FeedStore {
     sourceFilter?: string,
     limit = 40
   ): FarcasterCast[] {
-    // Only show top-level casts in the feed (replies appear inside threads)
-    let filtered = castsList.filter((c) => !c.parentCastId);
+    // Only show top-level / root casts in the feed (replies appear strictly inside threads)
+    let filtered = castsList.filter((c) => isRootCast(c));
 
     if (sourceFilter && sourceFilter !== 'all') {
       filtered = filtered.filter(

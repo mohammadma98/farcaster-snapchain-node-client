@@ -34,7 +34,7 @@ import {
   Filter,
   Plus,
 } from 'lucide-react';
-import { FarcasterCast, FarcasterUser, UserSession } from '@/lib/farcaster/types';
+import { FarcasterCast, FarcasterUser, UserSession, isRootCast } from '@/lib/farcaster/types';
 import { LoginPage } from './LoginPage';
 import { FarcasterAvatar } from './FarcasterAvatar';
 import { QuoteCastCard } from './QuoteCastCard';
@@ -366,7 +366,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         const res = await fetch(url);
         const data = await res.json();
         if (data.casts) {
-          setCasts(data.casts);
+          const rootCasts = (data.casts as FarcasterCast[]).filter(isRootCast);
+          setCasts(rootCasts);
           setFeedCursor(data.nextCursor);
           setHasMoreFeed(Boolean(data.hasMore));
         }
@@ -396,7 +397,9 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       if (Array.isArray(data.casts) && data.casts.length > 0) {
         setCasts((prev) => {
           const seen = new Set(prev.map((c) => c.hash));
-          const newUnique = data.casts.filter((c: FarcasterCast) => !seen.has(c.hash));
+          const newUnique = (data.casts as FarcasterCast[])
+            .filter(isRootCast)
+            .filter((c) => !seen.has(c.hash));
           return [...prev, ...newUnique];
         });
         setFeedCursor(data.nextCursor);
@@ -1868,7 +1871,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {casts.map((cast) => (
+                    {casts.filter(isRootCast).map((cast) => (
                       <article
                         key={cast.hash}
                         className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs hover:border-purple-300 transition-all space-y-3"

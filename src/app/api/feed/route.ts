@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { feedStore } from '@/lib/farcaster/feed-store';
+import { isRootCast } from '@/lib/farcaster/types';
 import { isPostgresAvailable } from '@/lib/db/pool';
 import { initDatabaseSchema } from '@/lib/db/schema';
 import { CastRepository, FollowRepository } from '@/lib/db/repositories';
@@ -67,18 +68,19 @@ export async function GET(request: Request) {
         onlySelfRegistered,
       });
 
-      if (dbCasts.length > 0) {
+      const rootDbCasts = dbCasts.filter(isRootCast);
+      if (rootDbCasts.length > 0) {
         // Trigger background stats sync for visible casts to refresh reaction numbers
-        for (const c of dbCasts) {
+        for (const c of rootDbCasts) {
           DeltaSyncService.syncCastStats(c.hash, c.fid, nodeUrl).catch(() => {});
         }
 
-        const nextCursor = dbCasts[dbCasts.length - 1]?.timestamp;
+        const nextCursor = rootDbCasts[rootDbCasts.length - 1]?.timestamp;
         return NextResponse.json({
           status: 'ok',
-          casts: dbCasts,
-          count: dbCasts.length,
-          hasMore: dbCasts.length >= limit,
+          casts: rootDbCasts,
+          count: rootDbCasts.length,
+          hasMore: rootDbCasts.length >= limit,
           nextCursor,
           mode: mode || (viewerFid ? 'following' : 'global'),
           viewerFid,
@@ -114,12 +116,13 @@ export async function GET(request: Request) {
       ).catch(() => {});
     }
 
-    const nextCursor = fallbackCasts[fallbackCasts.length - 1]?.timestamp;
+    const rootFallbackCasts = fallbackCasts.filter(isRootCast);
+    const nextCursor = rootFallbackCasts[rootFallbackCasts.length - 1]?.timestamp;
     return NextResponse.json({
       status: 'ok',
-      casts: fallbackCasts,
-      count: fallbackCasts.length,
-      hasMore: fallbackCasts.length >= limit,
+      casts: rootFallbackCasts,
+      count: rootFallbackCasts.length,
+      hasMore: rootFallbackCasts.length >= limit,
       nextCursor,
       mode: mode || (viewerFid ? 'following' : 'global'),
       viewerFid,
