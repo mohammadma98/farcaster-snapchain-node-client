@@ -29,6 +29,7 @@ export interface FarcasterUser {
   pfpUrl?: string;
   bio?: string;
   custodyAddress?: string;
+  primaryAddress?: string;
   hasStorage?: boolean;
   followerCount?: number;
   followingCount?: number;

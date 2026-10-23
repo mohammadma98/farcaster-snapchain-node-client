@@ -44,74 +44,60 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
   const [hasCopied, setHasCopied] = useState<boolean>(false);
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
 
-  // Demo preview state when user is not logged in
-  const [demoFid, setDemoFid] = useState<number | null>(null);
+  const fetchWalletData = useCallback(async () => {
+    if (!session?.fid) {
+      setTokens([]);
+      setTotalUsd(0);
+      setResolvedAddress(null);
+      return;
+    }
 
-  const activeFid = session?.fid || demoFid;
+    setIsLoading(true);
+    setError(null);
 
-  const fetchWalletData = useCallback(
-    async (targetFid?: number | null, customAddress?: string | null) => {
-      if (!targetFid && !customAddress) {
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.set('fid', String(session.fid));
+      if (session.custodyAddress) {
+        queryParams.set('fallbackAddress', session.custodyAddress);
+      }
+      queryParams.set('nodeUrl', nodeUrl);
+
+      const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
+      const data = await res.json();
+
+      if (data.status === 'ok') {
+        setTokens(data.tokens || []);
+        setTotalUsd(data.totalUsd || 0);
+        setBaseUsd(data.baseUsd || 0);
+        setEthUsd(data.ethUsd || 0);
+        setResolvedAddress(data.address || null);
+        setAddressSource(data.addressSource || null);
+      } else if (data.status === 'no_address') {
         setTokens([]);
         setTotalUsd(0);
         setResolvedAddress(null);
-        return;
+        setError('No primary Ethereum address found for this account.');
+      } else {
+        setError(data.message || 'Unable to load wallet balances.');
       }
-
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const queryParams = new URLSearchParams();
-        if (customAddress) {
-          queryParams.set('address', customAddress);
-        } else if (targetFid) {
-          queryParams.set('fid', String(targetFid));
-        }
-        if (session?.custodyAddress) {
-          queryParams.set('fallbackAddress', session.custodyAddress);
-        }
-        queryParams.set('nodeUrl', nodeUrl);
-
-        const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
-        const data = await res.json();
-
-        if (data.status === 'ok') {
-          setTokens(data.tokens || []);
-          setTotalUsd(data.totalUsd || 0);
-          setBaseUsd(data.baseUsd || 0);
-          setEthUsd(data.ethUsd || 0);
-          setResolvedAddress(data.address || null);
-          setAddressSource(data.addressSource || null);
-        } else if (data.status === 'no_address') {
-          setTokens([]);
-          setTotalUsd(0);
-          setResolvedAddress(null);
-          setError('No primary Ethereum address found for this account.');
-        } else {
-          setError(data.message || 'Unable to load wallet balances.');
-        }
-      } catch (err: any) {
-        setError(err.message || 'Network error fetching wallet data.');
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [nodeUrl]
-  );
+    } catch (err: any) {
+      setError(err.message || 'Network error fetching wallet data.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session?.fid, session?.custodyAddress, nodeUrl]);
 
   useEffect(() => {
     if (session?.fid) {
-      setDemoFid(null);
-      fetchWalletData(session.fid);
-    } else if (demoFid) {
-      fetchWalletData(demoFid);
+      fetchWalletData();
     } else {
       setTokens([]);
       setTotalUsd(0);
       setResolvedAddress(null);
+      setError(null);
     }
-  }, [session?.fid, demoFid, fetchWalletData]);
+  }, [session?.fid, fetchWalletData]);
 
   const handleCopyAddress = () => {
     if (!resolvedAddress) return;
@@ -160,10 +146,10 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
           </div>
         </div>
 
-        {/* Action button */}
-        {(activeFid || resolvedAddress) && (
+        {/* Refresh Action button */}
+        {session && (
           <button
-            onClick={() => fetchWalletData(activeFid, resolvedAddress)}
+            onClick={() => fetchWalletData()}
             disabled={isLoading}
             className="p-1.5 text-slate-400 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
             title="Refresh balance"
@@ -173,42 +159,17 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
         )}
       </div>
 
-      {/* 2. Body State: Not Logged In & No Demo */}
-      {!session && !demoFid && (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3.5 text-center space-y-2.5">
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Log in to automatically view your Farcaster <span className="font-semibold text-slate-800">Primary Wallet</span> balances on Base & Ethereum.
+      {/* 2. Unauthenticated State */}
+      {!session && (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3.5 text-center">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Please log in with your Farcaster account to view your primary connected wallet holdings.
           </p>
-          <div className="pt-1 flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              Or Instant Demo Preview:
-            </span>
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              <button
-                onClick={() => setDemoFid(432209)}
-                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 shadow-2xs transition-all"
-              >
-                @mohammad98
-              </button>
-              <button
-                onClick={() => setDemoFid(5650)}
-                className="text-[11px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
-              >
-                @vitalik.eth
-              </button>
-              <button
-                onClick={() => setDemoFid(3)}
-                className="text-[11px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
-              >
-                @dwr
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
       {/* 3. Loading Skeleton */}
-      {isLoading && (
+      {session && isLoading && (
         <div className="space-y-3 animate-pulse">
           <div className="h-16 rounded-xl bg-slate-100" />
           <div className="space-y-2">
@@ -218,23 +179,21 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
         </div>
       )}
 
-      {/* 4. Error Message */}
-      {!isLoading && error && (activeFid || resolvedAddress) && (
-        <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 p-3 text-center space-y-1">
+      {/* 4. Error State */}
+      {session && !isLoading && error && (
+        <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 p-3 text-center space-y-1.5">
           <p className="text-xs text-amber-800 font-medium">{error}</p>
-          {demoFid && (
-            <button
-              onClick={() => setDemoFid(null)}
-              className="text-[11px] text-amber-700 underline font-semibold hover:text-amber-900"
-            >
-              Reset demo
-            </button>
-          )}
+          <button
+            onClick={() => fetchWalletData()}
+            className="text-[11px] text-amber-900 underline font-semibold hover:text-amber-950"
+          >
+            Try again
+          </button>
         </div>
       )}
 
       {/* 5. Wallet Content (Loaded) */}
-      {!isLoading && resolvedAddress && (
+      {session && !isLoading && resolvedAddress && (
         <div className="space-y-3">
           {/* Address Bar */}
           <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200/80 px-2.5 py-1.5 text-xs text-slate-600">
@@ -346,7 +305,6 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
                         alt={token.symbol}
                         className="h-6 w-6 rounded-full bg-slate-100 object-cover shrink-0 border border-slate-200/70"
                         onError={(e) => {
-                          // Fallback to initial letter
                           (e.target as HTMLElement).style.display = 'none';
                         }}
                       />
@@ -392,18 +350,6 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
               ))}
             </div>
           ) : null}
-
-          {/* Demo reset footer */}
-          {demoFid && !session && (
-            <div className="pt-1 text-center">
-              <button
-                onClick={() => setDemoFid(null)}
-                className="text-[11px] text-purple-700 font-semibold hover:underline"
-              >
-                Close demo preview
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

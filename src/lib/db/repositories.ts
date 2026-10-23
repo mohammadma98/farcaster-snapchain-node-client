@@ -7,14 +7,15 @@ export class UserRepository {
     const pool = getDatabasePool();
     await pool.query(
       `
-      INSERT INTO users (fid, username, display_name, pfp_url, bio, custody_address, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      INSERT INTO users (fid, username, display_name, pfp_url, bio, custody_address, primary_address, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
       ON CONFLICT (fid) DO UPDATE SET
         username = COALESCE(EXCLUDED.username, users.username),
         display_name = COALESCE(EXCLUDED.display_name, users.display_name),
         pfp_url = COALESCE(EXCLUDED.pfp_url, users.pfp_url),
         bio = COALESCE(EXCLUDED.bio, users.bio),
         custody_address = COALESCE(EXCLUDED.custody_address, users.custody_address),
+        primary_address = COALESCE(EXCLUDED.primary_address, users.primary_address),
         updated_at = NOW()
     `,
       [
@@ -24,7 +25,23 @@ export class UserRepository {
         user.pfpUrl || null,
         user.bio || null,
         user.custodyAddress || null,
+        user.primaryAddress || null,
       ]
+    );
+  }
+
+  static async updatePrimaryAddress(fid: number, primaryAddress: string): Promise<void> {
+    if (!fid || !primaryAddress) return;
+    const pool = getDatabasePool();
+    await pool.query(
+      `
+      INSERT INTO users (fid, primary_address, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (fid) DO UPDATE SET
+        primary_address = EXCLUDED.primary_address,
+        updated_at = NOW()
+    `,
+      [fid, primaryAddress]
     );
   }
 
@@ -40,6 +57,7 @@ export class UserRepository {
       pfpUrl: row.pfp_url,
       bio: row.bio,
       custodyAddress: row.custody_address,
+      primaryAddress: row.primary_address,
     };
   }
 
@@ -56,6 +74,7 @@ export class UserRepository {
       pfpUrl: row.pfp_url,
       bio: row.bio,
       custodyAddress: row.custody_address,
+      primaryAddress: row.primary_address,
     };
   }
 }

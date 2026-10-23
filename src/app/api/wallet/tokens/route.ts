@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { defaultNodeClient } from '@/lib/farcaster/node-client';
+import { isPostgresAvailable } from '@/lib/db/pool';
+import { initDatabaseSchema } from '@/lib/db/schema';
+import { UserRepository } from '@/lib/db/repositories';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,14 +103,41 @@ export async function GET(request: Request) {
   if (!address && fidParam) {
     const fid = parseInt(fidParam, 10);
     if (!isNaN(fid) && fid > 0) {
-      try {
-        const walletInfo = await defaultNodeClient.getPrimaryWalletAddress(fid, nodeUrl);
-        if (walletInfo.ethAddress) {
-          address = walletInfo.ethAddress;
-          addressSource = walletInfo.source;
+      // Step A: Check intermediate PostgreSQL database first
+      const hasDb = await isPostgresAvailable();
+      if (hasDb) {
+        try {
+          await initDatabaseSchema();
+          const dbUser = await UserRepository.getUserByFid(fid);
+          if (dbUser?.primaryAddress && /^0x[a-fA-F0-9]{40}$/.test(dbUser.primaryAddress)) {
+            address = dbUser.primaryAddress;
+            addressSource = 'primary';
+          }
+        } catch (dbErr: any) {
+          console.warn('[DB] Failed reading primary_address from users table:', dbErr.message);
         }
-      } catch (e: any) {
-        console.warn('Error resolving primary wallet from node:', e.message);
+      }
+
+      // Step B: If not in DB, query Farcaster protocol node and persist to PostgreSQL
+      if (!address) {
+        try {
+          const walletInfo = await defaultNodeClient.getPrimaryWalletAddress(fid, nodeUrl);
+          if (walletInfo.ethAddress) {
+            address = walletInfo.ethAddress;
+            addressSource = walletInfo.source;
+
+            // Persist primary address into PostgreSQL users table
+            if (hasDb && address) {
+              try {
+                await UserRepository.updatePrimaryAddress(fid, address);
+              } catch (saveErr: any) {
+                console.warn('[DB] Failed saving primary_address to users table:', saveErr.message);
+              }
+            }
+          }
+        } catch (e: any) {
+          console.warn('Error resolving primary wallet from node:', e.message);
+        }
       }
     }
   }

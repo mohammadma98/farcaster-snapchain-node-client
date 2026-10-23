@@ -32,9 +32,11 @@ export async function initDatabaseSchema(): Promise<boolean> {
         pfp_url TEXT,
         bio TEXT,
         custody_address VARCHAR(42),
+        primary_address VARCHAR(42),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+      CREATE INDEX IF NOT EXISTS idx_users_primary_address ON users(primary_address);
     `);
 
     // 2. Casts table
@@ -57,6 +59,8 @@ export async function initDatabaseSchema(): Promise<boolean> {
       ALTER TABLE users ALTER COLUMN username TYPE TEXT;
       ALTER TABLE users ALTER COLUMN display_name TYPE TEXT;
       ALTER TABLE users ALTER COLUMN bio TYPE TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_address VARCHAR(42);
+      CREATE INDEX IF NOT EXISTS idx_users_primary_address ON users(primary_address);
       ALTER TABLE casts ALTER COLUMN client_source TYPE TEXT;
     `);
 
