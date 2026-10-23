@@ -10,6 +10,7 @@ import {
   Heart,
   Repeat,
   MessageSquare,
+  MessageCircle,
   Quote,
   Share2,
   Check,
@@ -145,7 +146,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const [activeTab, setActiveTab] = useState<'feed' | 'thread' | 'profile' | 'diagnostics'>('feed');
   const [threadHash, setThreadHash] = useState<string | null>(null);
   const [profileFid, setProfileFid] = useState<number | null>(null);
-  const [profileTab, setProfileTab] = useState<'casts' | 'quotes' | 'recasts' | 'likes'>('casts');
+  const [profileTab, setProfileTab] = useState<'casts' | 'replies' | 'quotes' | 'recasts' | 'likes'>('casts');
   const [isLoadingProfileCasts, setIsLoadingProfileCasts] = useState(false);
 
   // Authentication
@@ -537,10 +538,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
-  // 6. Fetch Profile Tab Items (Casts, Quotes, Recasts, Likes)
+  // 6. Fetch Profile Tab Items (Casts, Replies, Quotes, Recasts, Likes)
   const fetchProfileCasts = async (
     fidOrUsername: number | string,
-    tab: 'casts' | 'quotes' | 'recasts' | 'likes' = 'casts',
+    tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes' = 'casts',
     targetNode = nodeUrl
   ) => {
     setIsLoadingProfileCasts(true);
@@ -565,7 +566,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // 7. Open User Profile
   const handleOpenProfile = async (
     fidOrUsername: number | string,
-    tab: 'casts' | 'quotes' | 'recasts' | 'likes' = 'casts',
+    tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes' = 'casts',
     updateHistory = true
   ) => {
     setActiveTab('profile');
@@ -629,7 +630,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
-  const handleSelectProfileTab = (tab: 'casts' | 'quotes' | 'recasts' | 'likes') => {
+  const handleSelectProfileTab = (tab: 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes') => {
     setProfileTab(tab);
     if (currentProfile) {
       const u = currentProfile.username || currentProfile.fid;
@@ -670,7 +671,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     async (pathname: string, search: string, updateHistory = false) => {
       const cleanPath = pathname.replace(/\/$/, '') || '/';
       const searchParams = new URLSearchParams(search);
-      const tabParam = (searchParams.get('tab') as 'casts' | 'quotes' | 'recasts' | 'likes') || 'casts';
+      const tabParam = (searchParams.get('tab') as 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes') || 'casts';
 
       if (cleanPath === '/' || cleanPath === '') {
         setActiveTab('feed');
@@ -2184,9 +2185,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                     </div>
 
                     {/* Profile Navigation Tabs (like farcaster.xyz) */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-1.5 shadow-xs flex items-center gap-1">
+                    <div className="bg-white rounded-2xl border border-slate-200 p-1.5 shadow-xs flex items-center gap-1 overflow-x-auto scrollbar-none">
                       {[
                         { key: 'casts', label: 'Casts', icon: MessageSquare },
+                        { key: 'replies', label: 'Replies', icon: MessageCircle },
                         { key: 'quotes', label: 'Quotes', icon: Quote },
                         { key: 'recasts', label: 'Recasts', icon: Repeat },
                         { key: 'likes', label: 'Likes', icon: Heart },
@@ -2197,13 +2199,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                           <button
                             key={tabItem.key}
                             onClick={() => handleSelectProfileTab(tabItem.key as any)}
-                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                            className={`flex-1 min-w-[70px] flex items-center justify-center gap-1.5 sm:gap-2 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all shrink-0 ${
                               isActive
                                 ? 'bg-purple-50 text-purple-700 shadow-xs'
                                 : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
                             }`}
                           >
-                            <Icon className={`h-4 w-4 ${isActive ? 'text-purple-600' : 'text-slate-400'}`} />
+                            <Icon className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${isActive ? 'text-purple-600' : 'text-slate-400'}`} />
                             <span>{tabItem.label}</span>
                             {isActive && !isLoadingProfileCasts && (
                               <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.5 rounded-full font-semibold">
@@ -2228,6 +2230,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                             {profileTab === 'likes' && <Heart className="h-6 w-6" />}
                             {profileTab === 'recasts' && <Repeat className="h-6 w-6" />}
                             {profileTab === 'quotes' && <Quote className="h-6 w-6" />}
+                            {profileTab === 'replies' && <MessageCircle className="h-6 w-6" />}
                             {profileTab === 'casts' && <MessageSquare className="h-6 w-6" />}
                           </div>
                           <h4 className="text-sm font-bold text-slate-800 capitalize">No {profileTab} yet</h4>
@@ -2238,6 +2241,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               ? `@${currentProfile.username || currentProfile.fid} has not recasted any posts yet.`
                               : profileTab === 'quotes'
                               ? `@${currentProfile.username || currentProfile.fid} has not published any quote casts yet.`
+                              : profileTab === 'replies'
+                              ? `@${currentProfile.username || currentProfile.fid} has not replied to any casts yet.`
                               : `@${currentProfile.username || currentProfile.fid} has not published any casts yet.`}
                           </p>
                         </div>
@@ -2288,6 +2293,39 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                 <span className="text-[11px] text-slate-400">{formatTimeAgo(cast.timestamp)}</span>
                               </div>
                             </div>
+
+                            {/* Replying To Banner for reply casts */}
+                            {cast.parentCastId && (
+                              <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-purple-50/70 border border-purple-100/80 px-2.5 py-1.5 rounded-xl w-fit">
+                                <MessageCircle className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                                <span>Replying to</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenProfile(
+                                      cast.parentAuthor?.username || cast.parentAuthor?.fid || cast.parentCastId!.fid,
+                                      'casts',
+                                      true
+                                    );
+                                  }}
+                                  className="font-semibold text-purple-700 hover:text-purple-900 hover:underline"
+                                >
+                                  @{cast.parentAuthor?.username || (cast.parentCastId.fid ? `FID ${cast.parentCastId.fid}` : 'user')}
+                                </button>
+                                {cast.parentCastId.hash && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenThread(cast.parentCastId!.hash, cast.parentAuthor?.username, true);
+                                    }}
+                                    className="text-[10px] text-purple-500 hover:text-purple-800 ml-1 font-mono hover:underline"
+                                    title="View parent thread"
+                                  >
+                                    view thread →
+                                  </button>
+                                )}
+                              </div>
+                            )}
 
                             {/* Cast Body with Link & Mention Highlighting */}
                             <div

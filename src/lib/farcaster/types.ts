@@ -52,6 +52,11 @@ export interface FarcasterCast {
     fid: number;
     hash: string;
   };
+  parentAuthor?: {
+    fid: number;
+    username?: string;
+    displayName?: string;
+  };
   parentUrl?: string;
   reactions?: {
     likesCount: number;

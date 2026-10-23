@@ -156,11 +156,20 @@ class FeedStore {
   }
 
   /**
-   * Get all casts by an FID from local store
+   * Get root casts (excluding replies) by an FID from local store
    */
   public getCastsByFid(fid: number): FarcasterCast[] {
     return Array.from(this.casts.values())
-      .filter((c) => c.fid === fid && !c.parentCastId)
+      .filter((c) => c.fid === fid && (!c.parentCastId || (!c.parentCastId.hash && !c.parentCastId.fid)))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Get reply casts by an FID from local store
+   */
+  public getReplyCastsByFid(fid: number): FarcasterCast[] {
+    return Array.from(this.casts.values())
+      .filter((c) => c.fid === fid && Boolean(c.parentCastId?.hash || (c.parentCastId?.fid && c.parentCastId.fid > 0)))
       .sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -172,6 +181,17 @@ class FeedStore {
       const parent = this.casts.get(cast.parentCastId.hash);
       if (parent) {
         parent.repliesCount = (parent.repliesCount || 0) + 1;
+      }
+    }
+
+    if (!cast.parentAuthor && cast.parentCastId?.fid) {
+      const pUser = this.users.get(cast.parentCastId.fid);
+      if (pUser) {
+        cast.parentAuthor = {
+          fid: pUser.fid,
+          username: pUser.username,
+          displayName: pUser.displayName,
+        };
       }
     }
 

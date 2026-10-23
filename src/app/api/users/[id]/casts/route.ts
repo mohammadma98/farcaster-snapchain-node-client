@@ -13,7 +13,7 @@ export async function GET(
     const { id } = params;
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '30', 10);
-    const tab = searchParams.get('tab') || 'casts'; // 'casts' | 'quotes' | 'recasts' | 'likes'
+    const tab = searchParams.get('tab') || 'casts'; // 'casts' | 'replies' | 'quotes' | 'recasts' | 'likes'
     const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
 
     const user = await feedStore.getUser(id, nodeUrl);
@@ -73,15 +73,81 @@ export async function GET(
       if (resultCasts.length === 0) {
         resultCasts = feedStore.getUserQuoteCasts(user.fid);
       }
+
+      for (const c of resultCasts) {
+        if (!c.author) {
+          c.author = {
+            fid: user.fid,
+            username: user.username,
+            displayName: user.displayName,
+            pfpUrl: user.pfpUrl,
+          };
+        }
+      }
+    } else if (tab === 'replies') {
+      // 4. User's replies to other casts ONLY
+      const allNodeCasts = await defaultNodeClient.getCastsByFid(user.fid, Math.max(limit * 2, 50), nodeUrl);
+      const localReplies = feedStore.getReplyCastsByFid(user.fid);
+      const map = new Map<string, FarcasterCast>();
+
+      for (const c of [...localReplies, ...allNodeCasts]) {
+        const isReply = Boolean(c.parentCastId?.hash || (c.parentCastId?.fid && c.parentCastId.fid > 0));
+        if (isReply) {
+          if (!c.author) {
+            c.author = {
+              fid: user.fid,
+              username: user.username,
+              displayName: user.displayName,
+              pfpUrl: user.pfpUrl,
+            };
+          }
+          map.set(c.hash, c);
+        }
+      }
+
+      resultCasts = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+
+      // Resolve parent authors asynchronously for replies if available
+      await Promise.allSettled(
+        resultCasts.slice(0, 20).map(async (c) => {
+          if (!c.parentAuthor && c.parentCastId?.fid) {
+            try {
+              const pUser = await feedStore.getUser(c.parentCastId.fid, nodeUrl);
+              if (pUser) {
+                c.parentAuthor = {
+                  fid: pUser.fid,
+                  username: pUser.username,
+                  displayName: pUser.displayName,
+                };
+              }
+            } catch {
+              // ignore
+            }
+          }
+        })
+      );
     } else {
-      // 4. Default: User's authored casts
-      const casts = await defaultNodeClient.getCastsByFid(user.fid, limit, nodeUrl);
+      // 5. Default ('casts'): User's original root casts ONLY (strictly exclude replies)
+      const allNodeCasts = await defaultNodeClient.getCastsByFid(user.fid, Math.max(limit * 2, 50), nodeUrl);
       const localCasts = feedStore.getCastsByFid(user.fid);
       const map = new Map<string, FarcasterCast>();
-      for (const c of [...localCasts, ...casts]) {
-        map.set(c.hash, c);
+
+      for (const c of [...localCasts, ...allNodeCasts]) {
+        const isReply = Boolean(c.parentCastId?.hash || (c.parentCastId?.fid && c.parentCastId.fid > 0));
+        if (!isReply) {
+          if (!c.author) {
+            c.author = {
+              fid: user.fid,
+              username: user.username,
+              displayName: user.displayName,
+              pfpUrl: user.pfpUrl,
+            };
+          }
+          map.set(c.hash, c);
+        }
       }
-      resultCasts = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+
+      resultCasts = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
     }
 
     return NextResponse.json({
