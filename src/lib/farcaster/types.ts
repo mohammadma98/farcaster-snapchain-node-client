@@ -45,7 +45,7 @@ export interface FarcasterCast {
     displayName?: string;
     pfpUrl?: string;
   };
-  clientSource?: string; // Identified client: Warpcast, Supercast, Phaver, Direct Snapchain, etc.
+  clientSource?: string; // Identified client: Warpcast, Supercast, Phaver, Self-registered, etc.
   signer?: string; // Ed25519 public key hex of the signer
   clientFid?: number; // requestFid from key registration
   clientType?: 'known' | 'personal' | 'other'; // Client category

@@ -405,7 +405,7 @@ export function ClientApp({ lang }: ClientAppProps) {
   const availableClients = [
     { name: 'Warpcast', color: 'border-purple-500/40 text-purple-300 bg-purple-500/10' },
     { name: 'Supercast', color: 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10' },
-    { name: 'Direct Snapchain', color: 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10' },
+    { name: 'Self-registered', color: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' },
     { name: 'Phaver', color: 'border-pink-500/40 text-pink-300 bg-pink-500/10' },
   ];
 
@@ -526,15 +526,15 @@ export function ClientApp({ lang }: ClientAppProps) {
               <button
                 onClick={() => {
                   setFilterMode('include');
-                  setSelectedClients(['Direct Snapchain']);
+                  setSelectedClients(['Self-registered']);
                 }}
                 className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all whitespace-nowrap ${
-                  filterMode === 'include' && selectedClients.includes('Direct Snapchain')
+                  filterMode === 'include' && selectedClients.includes('Self-registered')
                     ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
                     : 'bg-white/5 text-purple-200/60 hover:text-white hover:bg-white/10'
                 }`}
               >
-                Native Snapchain
+                Self-registered
               </button>
             </div>
 

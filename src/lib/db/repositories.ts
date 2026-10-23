@@ -280,9 +280,13 @@ export class CastRepository {
     }
 
     if (options.sourceFilter && options.sourceFilter !== 'all') {
-      whereClauses.push(`LOWER(c.client_source) = LOWER($${idx})`);
-      params.push(options.sourceFilter);
-      idx++;
+      if (options.sourceFilter.toLowerCase() === 'self-registered' || options.sourceFilter.toLowerCase() === 'direct snapchain') {
+        whereClauses.push(`(c.client_type = 'personal' OR LOWER(c.client_source) = 'self-registered' OR LOWER(c.client_source) = 'direct snapchain')`);
+      } else {
+        whereClauses.push(`LOWER(c.client_source) = LOWER($${idx})`);
+        params.push(options.sourceFilter);
+        idx++;
+      }
     }
 
     // Precise cryptographic client category filtering
@@ -564,11 +568,11 @@ function mapRowToCast(row: any): FarcasterCast {
     fid: row.fid,
     text: row.text,
     timestamp: Number(row.timestamp),
-    clientSource: row.client_name || row.client_source || 'Direct Snapchain',
+    clientSource: row.client_name === 'Direct Snapchain' ? 'Self-registered' : (row.client_name || row.client_source || 'Self-registered'),
     signer: row.signer || undefined,
     clientFid: row.client_fid ? Number(row.client_fid) : undefined,
     clientType: row.client_type || 'other',
-    clientName: row.client_name || row.client_source || 'Direct Snapchain',
+    clientName: row.client_name === 'Direct Snapchain' ? 'Self-registered' : (row.client_name || row.client_source || 'Self-registered'),
     embeds,
     parentCastId: row.parent_hash ? { fid: row.parent_fid || 0, hash: row.parent_hash } : undefined,
     author: row.username

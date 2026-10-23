@@ -23,17 +23,14 @@ export function identifyCastClient(cast: {
   const embeds = cast.embeds || [];
   const embedUrls = embeds.map(e => e.url || '').filter(Boolean);
 
-  // 1. Direct local client submissions via Snapchain node
-  if (cast.isLocal || (cast.clientSource === 'Direct Snapchain' && (cast.hash?.startsWith('0xlocal') || !cast.parentUrl?.includes('warpcast.com')))) {
-    // If it was explicitly marked as Direct Snapchain from composer, keep Direct Snapchain
-    if (cast.clientSource === 'Direct Snapchain') {
-      return {
-        clientName: 'Direct Snapchain',
-        badgeColor: 'text-cyan-700 bg-cyan-50 border-cyan-200',
-        confidence: 'high',
-        indicator: 'Native Snapchain node submission',
-      };
-    }
+  // 1. Direct local client submissions / Self-registered keys
+  if (cast.isLocal || cast.clientSource === 'Self-registered' || (cast.clientSource === 'Direct Snapchain' && (cast.hash?.startsWith('0xlocal') || !cast.parentUrl?.includes('warpcast.com')))) {
+    return {
+      clientName: 'Self-registered',
+      badgeColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      confidence: 'high',
+      indicator: 'Self-registered personal key submission',
+    };
   }
 
   // 2. Supercast detection
@@ -114,13 +111,13 @@ export function identifyCastClient(cast: {
     };
   }
 
-  // 8. Explicit local client source
-  if (cast.clientSource === 'Direct Snapchain') {
+  // 8. Explicit local client source / Self-registered
+  if (cast.clientSource === 'Self-registered' || cast.clientSource === 'Direct Snapchain') {
     return {
-      clientName: 'Direct Snapchain',
-      badgeColor: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+      clientName: 'Self-registered',
+      badgeColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
       confidence: 'high',
-      indicator: 'Native Snapchain node submission',
+      indicator: 'Self-registered personal key submission',
     };
   }
 

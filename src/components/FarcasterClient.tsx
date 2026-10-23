@@ -67,7 +67,6 @@ const PRESET_NODES: SnapchainNodePreset[] = [
 const KNOWN_SOURCES = [
   { id: 'all', label: 'All Clients / Sources' },
   { id: 'Self-registered', label: 'Self-registered (Personal)' },
-  { id: 'Direct Snapchain', label: 'Direct Snapchain' },
   { id: 'Warpcast', label: 'Warpcast' },
   { id: 'Firefly', label: 'Firefly' },
   { id: 'Supercast', label: 'Supercast' },
@@ -96,15 +95,13 @@ const DEFAULT_SUGGESTED_USERS: FarcasterUser[] = [
 ];
 
 function getClientBadgeColor(source?: string, clientType?: string) {
-  if (clientType === 'personal' || source === 'Self-registered') {
+  if (clientType === 'personal' || source === 'Self-registered' || source === 'Direct Snapchain') {
     return 'text-emerald-700 bg-emerald-50 border-emerald-200';
   }
   if (clientType === 'other' || source?.startsWith('FID ') || source?.startsWith('Client FID')) {
     return 'text-slate-700 bg-slate-50 border-slate-200';
   }
   switch (source) {
-    case 'Direct Snapchain':
-      return 'text-cyan-700 bg-cyan-50 border-cyan-200';
     case 'Firefly':
       return 'text-blue-700 bg-blue-50 border-blue-200';
     case 'Supercast':
@@ -126,15 +123,13 @@ function getClientBadgeColor(source?: string, clientType?: string) {
 }
 
 function getClientDotColor(source?: string, clientType?: string) {
-  if (clientType === 'personal' || source === 'Self-registered') {
+  if (clientType === 'personal' || source === 'Self-registered' || source === 'Direct Snapchain') {
     return 'bg-emerald-500';
   }
   if (clientType === 'other' || source?.startsWith('FID ') || source?.startsWith('Client FID')) {
     return 'bg-slate-400';
   }
   switch (source) {
-    case 'Direct Snapchain':
-      return 'bg-cyan-500';
     case 'Firefly':
       return 'bg-blue-500';
     case 'Supercast':
@@ -246,8 +241,14 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   const castSources = React.useMemo(() => {
     const counts: Record<string, number> = {};
     for (const c of casts) {
-      if (c.clientSource) {
-        counts[c.clientSource] = (counts[c.clientSource] || 0) + 1;
+      const isPersonal =
+        c.clientType === 'personal' ||
+        c.clientName === 'Self-registered' ||
+        c.clientSource === 'Direct Snapchain' ||
+        c.clientSource === 'Self-registered';
+      const src = isPersonal ? 'Self-registered' : (c.clientName || c.clientSource);
+      if (src) {
+        counts[src] = (counts[src] || 0) + 1;
       }
     }
     const allIds = Array.from(new Set([...KNOWN_SOURCES.map((k) => k.id), ...Object.keys(counts)]));
