@@ -505,10 +505,10 @@ for SHARD_ID in "${SHARDS[@]}"; do
     fi
     mkdir -p "$BUFFER_DIR"
 
-    # Multi-Core Adaptive Extraction Worker Pool (Adaptive 2-4 workers; disk tar injection is the bound)
+    # Multi-Core Adaptive Extraction Worker Pool (Adaptive 1-4 workers tuned to host CPU cores)
     CPU_CORES=$(nproc 2>/dev/null || echo 1)
+    if [ "$CPU_CORES" -lt 1 ]; then CPU_CORES=1; fi
     MAX_EXT_WORKERS=$(( CPU_CORES > 4 ? 4 : CPU_CORES ))
-    if [ "$MAX_EXT_WORKERS" -lt 2 ]; then MAX_EXT_WORKERS=2; fi
 
     # Network Ingestion Concurrency
     CONCURRENT_DOWNLOADS=4
@@ -734,17 +734,30 @@ for SHARD_ID in "${SHARDS[@]}"; do
         local chunk_name="${CHUNK_ARRAY[idx]}"
         local comp_file="${BUFFER_DIR}/${chunk_name}"
         local raw_file="${BUFFER_DIR}/${chunk_name}.raw"
+        local err_log="${BUFFER_DIR}/.ext_err_${idx}.log"
 
-        touch "${BUFFER_DIR}/.ext_active_${idx}"
+        # Idempotency guard: If raw file already materialized, exit cleanly
+        if [ -f "$raw_file" ] && [ -s "$raw_file" ]; then
+            touch "${BUFFER_DIR}/.ext_done_${idx}"
+            rm -f "${BUFFER_DIR}/.ext_active_${idx}" "${BUFFER_DIR}/.ext_err_${idx}" "$err_log" 2>/dev/null || true
+            return 0
+        fi
+
+        # Pre-flight check: If compressed file missing, check if already extracted or trigger recovery
+        if [ ! -f "$comp_file" ] || [ ! -s "$comp_file" ]; then
+            rm -f "${BUFFER_DIR}/.ext_active_${idx}" "${BUFFER_DIR}/.dl_done_${idx}" 2>/dev/null || true
+            return 0
+        fi
+
         local t_start
         t_start=$(date +%s%3N 2>/dev/null || date +%s)
 
-        rm -f "${raw_file}.tmp" 2>/dev/null || true
-        if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>/dev/null && [ -s "${raw_file}.tmp" ]; then
+        rm -f "${raw_file}.tmp" "$err_log" 2>/dev/null || true
+        if $DECOMPRESS_BIN "$comp_file" > "${raw_file}.tmp" 2>"$err_log" && [ -s "${raw_file}.tmp" ]; then
             local t_end
             t_end=$(date +%s%3N 2>/dev/null || date +%s)
             mv -f "${raw_file}.tmp" "$raw_file"
-            rm -f "$comp_file" 2>/dev/null || true           # INSTANT DELETION OF COMPRESSED CHUNK FROM RAM
+            rm -f "$comp_file" "$err_log" 2>/dev/null || true           # INSTANT DELETION OF COMPRESSED CHUNK FROM RAM
             rm -f "${BUFFER_DIR}/.dl_done_${idx}" 2>/dev/null || true
             rm -f "${BUFFER_DIR}/.ext_active_${idx}" 2>/dev/null || true
             touch "${BUFFER_DIR}/.ext_done_${idx}"
@@ -754,7 +767,30 @@ for SHARD_ID in "${SHARDS[@]}"; do
         else
             rm -f "${raw_file}.tmp" 2>/dev/null || true
             rm -f "${BUFFER_DIR}/.ext_active_${idx}" 2>/dev/null || true
-            echo "[ERROR] Decompression failed for chunk ${chunk_name}" >> "$LOG_FILE"
+
+            # Defensive verification: If another worker completed the raw chunk, accept it
+            if [ -f "$raw_file" ] && [ -s "$raw_file" ]; then
+                touch "${BUFFER_DIR}/.ext_done_${idx}"
+                rm -f "$err_log" 2>/dev/null || true
+                return 0
+            fi
+
+            # Self-healing retry check: Retry download if chunk was partially received / corrupted
+            local retry_count
+            retry_count=$(cat "${BUFFER_DIR}/.ext_retry_${idx}" 2>/dev/null || echo 0)
+            if [ "$retry_count" -lt 2 ]; then
+                retry_count=$(( retry_count + 1 ))
+                echo "$retry_count" > "${BUFFER_DIR}/.ext_retry_${idx}"
+                rm -f "$comp_file" "$err_log" "${BUFFER_DIR}/.dl_done_${idx}" 2>/dev/null || true
+                local chunk_url="${R2_PUBLIC_BASE}/${KEY_BASE}/${chunk_name}"
+                download_chunk "$idx" "$chunk_name" "$chunk_url" &
+                return 0
+            fi
+
+            local err_detail
+            err_detail=$(cat "$err_log" 2>/dev/null | tr '\n' ' ' || echo "Decompression error")
+            rm -f "$err_log" 2>/dev/null || true
+            echo "[ERROR] Decompression failed for chunk ${chunk_name}: ${err_detail}" >> "$LOG_FILE"
             touch "${BUFFER_DIR}/.ext_err_${idx}"
         fi
         return 0
@@ -778,10 +814,17 @@ for SHARD_ID in "${SHARDS[@]}"; do
         local max_ext_horizon=$(( curr_consume_idx + MAX_RAW_LOOKAHEAD ))
         if [ "$max_ext_horizon" -gt "$TOTAL_CHUNKS" ]; then max_ext_horizon="$TOTAL_CHUNKS"; fi
 
+        # Keep dispatch pointer synchronized with consumption horizon
+        if [ "$NEXT_EXT_DISPATCH_IDX" -lt "$curr_consume_idx" ]; then
+            NEXT_EXT_DISPATCH_IDX="$curr_consume_idx"
+        fi
+
         # Dispatch ready chunks between dispatch pointer and extraction horizon
         local scan_idx="$NEXT_EXT_DISPATCH_IDX"
         while [ "$active_ext" -lt "$MAX_EXT_WORKERS" ] && [ "$scan_idx" -lt "$max_ext_horizon" ] && [ "$scan_idx" -lt "$NEXT_DOWNLOAD_IDX" ]; do
-            if [ -f "${BUFFER_DIR}/.dl_done_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${scan_idx}" ]; then
+            if [ -f "${BUFFER_DIR}/.dl_done_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${scan_idx}" ] && [ ! -f "${BUFFER_DIR}/.injected_${scan_idx}" ]; then
+                # Pre-fork atomic state reservation (eliminates race window)
+                touch "${BUFFER_DIR}/.ext_active_${scan_idx}"
                 extract_chunk "$scan_idx" &
                 EXT_PIDS["$scan_idx"]=$!
                 active_ext=$(( active_ext + 1 ))
@@ -790,7 +833,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
         done
 
         # Advance NEXT_EXT_DISPATCH_IDX past already processed chunks
-        while [ "$NEXT_EXT_DISPATCH_IDX" -lt "$TOTAL_CHUNKS" ] && [ -f "${BUFFER_DIR}/.ext_done_${NEXT_EXT_DISPATCH_IDX}" ]; do
+        while [ "$NEXT_EXT_DISPATCH_IDX" -lt "$TOTAL_CHUNKS" ] && { [ -f "${BUFFER_DIR}/.ext_done_${NEXT_EXT_DISPATCH_IDX}" ] || [ -f "${BUFFER_DIR}/.injected_${NEXT_EXT_DISPATCH_IDX}" ]; }; do
             NEXT_EXT_DISPATCH_IDX=$(( NEXT_EXT_DISPATCH_IDX + 1 ))
         done
     }
@@ -1062,12 +1105,6 @@ for SHARD_ID in "${SHARDS[@]}"; do
                 exit 1
             fi
 
-            # Expedite chunk i if downloaded but not yet picked up by extraction pool
-            if [ -f "${BUFFER_DIR}/.dl_done_${i}" ] && [ ! -f "${BUFFER_DIR}/.ext_active_${i}" ] && [ ! -f "${BUFFER_DIR}/.ext_done_${i}" ]; then
-                extract_chunk "$i" &
-                EXT_PIDS["$i"]=$!
-            fi
-
             if [ -f "${BUFFER_DIR}/.ext_done_${i}" ]; then
                 break
             fi
@@ -1088,6 +1125,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
             RAW_BYTES_INJECTED=$(stat -c%s "$CURRENT_RAW" 2>/dev/null || echo 0)
             cat "$CURRENT_RAW" >&3
             rm -f "$CURRENT_RAW" "${BUFFER_DIR}/.ext_done_${i}" 2>/dev/null || true   # INSTANT RAM RECLAMATION
+            touch "${BUFFER_DIR}/.injected_${i}"
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
             T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
             echo "$i $RAW_BYTES_INJECTED $T_INJ_START $T_INJ_END" >> "${BUFFER_DIR}/.pipe_stats"
@@ -1095,6 +1133,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
             # Emergency on-the-fly decompression directly into pipe
             $DECOMPRESS_BIN "$CURRENT_FILE" >&3
             rm -f "$CURRENT_FILE" "${BUFFER_DIR}/.dl_done_${i}" 2>/dev/null || true
+            touch "${BUFFER_DIR}/.injected_${i}"
             BYTES_PROCESSED=$(( BYTES_PROCESSED + CHUNK_SIZE ))
             T_INJ_END=$(date +%s%3N 2>/dev/null || date +%s)
             RAW_BYTES_INJECTED=$(( CHUNK_SIZE * 5 ))
@@ -1166,7 +1205,7 @@ rm -f "$PID_FILE" 2>/dev/null || true
 WORKER_SCRIPT_EOF
 
         chmod +x "${SNAPCHAIN_DIR}/.snapshot_worker.sh"
-        rm -f "$WORKER_DONE_FILE"
+        rm -f "$WORKER_DONE_FILE" "$WORKER_LOG_FILE"
 
         nohup bash "${SNAPCHAIN_DIR}/.snapshot_worker.sh" "$SNAPCHAIN_DIR" > "$WORKER_LOG_FILE" 2>&1 &
         WORKER_PID=$!
