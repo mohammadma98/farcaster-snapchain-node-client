@@ -33,12 +33,14 @@ import {
   Server,
   Filter,
   Plus,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { FarcasterCast, FarcasterUser, UserSession, isRootCast } from '@/lib/farcaster/types';
 import { LoginPage } from './LoginPage';
 import { FarcasterAvatar } from './FarcasterAvatar';
 import { QuoteCastCard } from './QuoteCastCard';
 import { CastMediaPreviews, FormattedCastText } from './LinkPreview';
+import { ComposeCastModal } from './ComposeCastModal';
 
 interface SnapchainNodePreset {
   id: string;
@@ -198,6 +200,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   // Composer State
   const [composeText, setComposeText] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isComposeModalOpen, setIsComposeModalOpen] = useState(false);
   const [quoteCast, setQuoteCast] = useState<FarcasterCast | null>(null);
   const [replyParent, setReplyParent] = useState<FarcasterCast | null>(null);
   const [publishSuccessMessage, setPublishSuccessMessage] = useState<string | null>(null);
@@ -987,6 +990,55 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
   };
 
+  // 8.1 Publish Cast from ComposeCastModal (supporting multiple Catbox image embeds)
+  const handleModalPublishCast = async (
+    text: string,
+    embeds?: Array<{ url?: string; castId?: { fid: number; hash: string } }>
+  ): Promise<boolean> => {
+    if (!text.trim() && (!embeds || embeds.length === 0)) return false;
+
+    if (!session) {
+      setIsAuthModalOpen(true);
+      return false;
+    }
+
+    try {
+      const res = await fetch('/api/casts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fid: session.fid,
+          signerPrivateKey: session.signerPrivateKey,
+          text: text.trim(),
+          embeds,
+          nodeUrl,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(data.error || 'Failed to publish cast');
+      }
+
+      setQuoteCast(null);
+      showToast('پیام در مم‌پول نود ثبت شد؛ پس از تایید در بلاک اسنپ‌چین در فید نمایش داده می‌شود.');
+
+      // Trigger feed refresh after 3.5s so the event indexed into PostgreSQL by the FeedWorker becomes visible
+      setTimeout(() => {
+        fetchFeed(sourceFilter, feedMode, session.fid);
+      }, 3500);
+
+      return true;
+    } catch (err: any) {
+      const msg = err.message || 'خطا در ارسال کست به نود';
+      showToast(msg);
+      if (msg.includes('invalid signer') && !msg.includes('عقب') && !msg.includes('lagging')) {
+        setIsAuthModalOpen(true);
+      }
+      throw err;
+    }
+  };
+
   // 9. Publish Reply in Thread View
   const handlePublishReply = async () => {
     if (!replyText.trim() || !currentThreadCast) return;
@@ -1573,11 +1625,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
               {session && (
                 <button
                   onClick={() => {
-                    handleBackToFeed(true);
-                    const el = document.getElementById('composer-textarea');
-                    el?.focus();
+                    setQuoteCast(null);
+                    setIsComposeModalOpen(true);
                   }}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-semibold py-3 px-4 text-sm shadow-md shadow-purple-600/20 transition-all"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-semibold py-3 px-4 text-sm shadow-md shadow-purple-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
                   <Send className="h-4 w-4" />
                   <span>New Cast</span>
@@ -1793,6 +1844,16 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
                         <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsComposeModalOpen(true)}
+                              className="flex items-center gap-1.5 text-slate-500 hover:text-purple-700 hover:bg-purple-50 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors"
+                              title="افزودن عکس با سرویس Catbox"
+                            >
+                              <ImageIcon className="h-4 w-4 text-purple-600" />
+                              <span>تصویر</span>
+                            </button>
+
                             <span
                               className={`text-[11px] font-mono ${
                                 composeText.length > 300 ? 'text-amber-600 font-bold' : 'text-slate-400'
@@ -2003,8 +2064,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                 return;
                               }
                               setQuoteCast(cast);
-                              const el = document.getElementById('composer-textarea');
-                              el?.focus();
+                              setIsComposeModalOpen(true);
                             }}
                             className="flex items-center gap-1.5 text-xs hover:text-purple-700 transition-colors p-1"
                             title="Quote this cast"
@@ -2222,11 +2282,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                               return;
                             }
                             setQuoteCast(currentThreadCast);
-                            setActiveTab('feed');
-                            setTimeout(() => {
-                              const el = document.getElementById('composer-textarea');
-                              el?.focus();
-                            }, 100);
+                            setIsComposeModalOpen(true);
                           }}
                           className="flex items-center gap-1.5 text-xs p-2 rounded-xl hover:bg-purple-50 text-slate-500 hover:text-purple-700"
                           title="Quote this cast"
@@ -2662,11 +2718,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                                     return;
                                   }
                                   setQuoteCast(cast);
-                                  setActiveTab('feed');
-                                  setTimeout(() => {
-                                    const el = document.getElementById('composer-textarea');
-                                    el?.focus();
-                                  }, 100);
+                                  setIsComposeModalOpen(true);
                                 }}
                                 className="flex items-center gap-1.5 text-xs hover:text-purple-700 transition-colors"
                                 title="Quote this cast"
@@ -3097,6 +3149,31 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </div>
         </div>
       )}
+
+      {/* Mobile Floating Action Button (New Cast) */}
+      {session && (
+        <button
+          onClick={() => {
+            setQuoteCast(null);
+            setIsComposeModalOpen(true);
+          }}
+          className="sm:hidden fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-purple-700 hover:bg-purple-800 text-white shadow-xl shadow-purple-700/30 flex items-center justify-center transition-transform active:scale-95"
+          title="New Cast"
+        >
+          <Send className="h-5 w-5" />
+        </button>
+      )}
+
+      {/* Professional Compose Cast Modal (Multi-Image Catbox Support) */}
+      <ComposeCastModal
+        isOpen={isComposeModalOpen}
+        onClose={() => setIsComposeModalOpen(false)}
+        session={session}
+        onPublish={handleModalPublishCast}
+        quoteCast={quoteCast}
+        onClearQuote={() => setQuoteCast(null)}
+        defaultNodeUrl={nodeUrl}
+      />
     </div>
   );
 }

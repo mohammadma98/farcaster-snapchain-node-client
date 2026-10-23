@@ -31,7 +31,9 @@ export function isDirectImageUrl(url: string): boolean {
     clean.endsWith('.avif') ||
     url.includes('imagedelivery.net') ||
     url.includes('i.imgur.com') ||
-    url.includes('res.cloudinary.com')
+    url.includes('res.cloudinary.com') ||
+    url.includes('files.catbox.moe') ||
+    url.includes('i.ibb.co')
   );
 }
 
@@ -272,9 +274,41 @@ export function CastMediaPreviews({
 
   if (allUrls.length === 0) return null;
 
+  // Separate direct image URLs from regular link URLs
+  const directImageUrls = allUrls.filter((u) => isDirectImageUrl(u));
+  const otherUrls = allUrls.filter((u) => !isDirectImageUrl(u));
+
   return (
     <div className="space-y-2 pt-1">
-      {allUrls.slice(0, 4).map((url) => (
+      {/* Multi-Image Gallery Grid for 2 or 3 images */}
+      {directImageUrls.length > 1 ? (
+        <div
+          className={`grid gap-2 my-2 max-w-2xl overflow-hidden rounded-2xl border border-slate-200/90 bg-slate-50 p-1 ${
+            directImageUrls.length === 2 ? 'grid-cols-2' : 'grid-cols-3'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {directImageUrls.slice(0, 3).map((imgUrl, idx) => (
+            <div
+              key={idx}
+              className="relative aspect-4/3 cursor-pointer group overflow-hidden rounded-xl bg-slate-100"
+              onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
+            >
+              <img
+                src={imgUrl}
+                alt={`Cast media ${idx + 1}`}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                loading="lazy"
+              />
+            </div>
+          ))}
+        </div>
+      ) : directImageUrls.length === 1 ? (
+        <SingleLinkPreview url={directImageUrls[0]} />
+      ) : null}
+
+      {/* Other URLs (Websites, YouTube, Videos) */}
+      {otherUrls.slice(0, 4 - directImageUrls.length).map((url) => (
         <SingleLinkPreview key={url} url={url} />
       ))}
     </div>
