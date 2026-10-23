@@ -91,9 +91,10 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   let address = searchParams.get('address')?.trim();
   const fidParam = searchParams.get('fid');
+  const fallbackAddress = searchParams.get('fallbackAddress')?.trim();
   const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
 
-  let addressSource: 'provided' | 'primary' | 'verification' | 'custody' | null = address ? 'provided' : null;
+  let addressSource: 'provided' | 'primary' | 'verification' | 'custody' | 'fallback' | null = address ? 'provided' : null;
 
   // 1. Resolve Primary Address if FID is provided and address is missing
   if (!address && fidParam) {
@@ -109,6 +110,12 @@ export async function GET(request: Request) {
         console.warn('Error resolving primary wallet from node:', e.message);
       }
     }
+  }
+
+  // 1.5. Fallback to session custody address if protocol lookup yielded no explicit address
+  if (!address && fallbackAddress && /^0x[a-fA-F0-9]{40}$/.test(fallbackAddress)) {
+    address = fallbackAddress;
+    addressSource = 'custody';
   }
 
   // If still no address found

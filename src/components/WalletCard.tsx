@@ -68,6 +68,9 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
         } else if (targetFid) {
           queryParams.set('fid', String(targetFid));
         }
+        if (session?.custodyAddress) {
+          queryParams.set('fallbackAddress', session.custodyAddress);
+        }
         queryParams.set('nodeUrl', nodeUrl);
 
         const res = await fetch(`/api/wallet/tokens?${queryParams.toString()}`);
@@ -180,16 +183,22 @@ export function WalletCard({ session, nodeUrl }: WalletCardProps) {
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
               Or Instant Demo Preview:
             </span>
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <button
+                onClick={() => setDemoFid(432209)}
+                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 shadow-2xs transition-all"
+              >
+                @mohammad98
+              </button>
               <button
                 onClick={() => setDemoFid(5650)}
-                className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
+                className="text-[11px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
               >
                 @vitalik.eth
               </button>
               <button
                 onClick={() => setDemoFid(3)}
-                className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
+                className="text-[11px] font-medium px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-purple-300 hover:text-purple-700 shadow-2xs transition-all"
               >
                 @dwr
               </button>

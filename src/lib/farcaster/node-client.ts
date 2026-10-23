@@ -528,6 +528,19 @@ export class SnapchainNodeClient {
       }
     }
 
+    // Fallback 3: If local/custom node failed or is offline, try the Sovereign Production Node
+    const SOVEREIGN_NODE_URL = 'http://162.35.98.172:3381';
+    if (!ethAddress && cleanUrl !== SOVEREIGN_NODE_URL) {
+      try {
+        const fallbackRes = await this.getPrimaryWalletAddress(fid, SOVEREIGN_NODE_URL);
+        if (fallbackRes.ethAddress) {
+          return fallbackRes;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     return { ethAddress, solAddress, source };
   }
 
