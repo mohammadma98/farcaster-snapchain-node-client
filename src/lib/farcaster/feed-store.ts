@@ -592,32 +592,23 @@ class FeedStore {
   }
 
   /**
-   * Get casts liked by user
+   * Get casts liked by user from session store
    */
   public getUserLikedCasts(fid: number): FarcasterCast[] {
     const likedHashes = this.userReactions.get(fid)?.likes || new Set<string>();
     const result: FarcasterCast[] = [];
-    
+
     // Check tracked liked casts
     for (const h of Array.from(likedHashes)) {
       const c = this.casts.get(h);
       if (c) result.push({ ...c, reactions: { ...c.reactions!, likedByMe: true } });
     }
 
-    // Also include any casts in store flagged as likedByMe if matching viewer
-    if (result.length === 0) {
-      for (const c of Array.from(this.casts.values())) {
-        if (c.reactions?.likedByMe) {
-          result.push(c);
-        }
-      }
-    }
-
     return result.sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**
-   * Get casts recasted by user
+   * Get casts recasted by user from session store
    */
   public getUserRecastedCasts(fid: number): FarcasterCast[] {
     const recastedHashes = this.userReactions.get(fid)?.recasts || new Set<string>();
@@ -628,15 +619,109 @@ class FeedStore {
       if (c) result.push({ ...c, reactions: { ...c.reactions!, recastByMe: true } });
     }
 
-    if (result.length === 0) {
-      for (const c of Array.from(this.casts.values())) {
-        if (c.reactions?.recastByMe) {
-          result.push(c);
-        }
+    return result.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Check whether an FID has reacted to a cast hash in local session memory
+   */
+  public hasUserReacted(fid: number, hash: string, type: 'like' | 'recast'): boolean {
+    const cleanHash = hash.startsWith('0x') ? hash : `0x${hash}`;
+    const record = this.userReactions.get(fid);
+    if (!record) return false;
+    return type === 'like' ? record.likes.has(cleanHash) : record.recasts.has(cleanHash);
+  }
+
+  /**
+   * Get authentic protocol reactions (likes or recasts) for an FID directly from Snapchain Read Node
+   */
+  public async getUserReactionCasts(
+    fid: number,
+    type: 'like' | 'recast',
+    limit = 30,
+    nodeUrl?: string,
+    viewerFid?: number
+  ): Promise<FarcasterCast[]> {
+    const targetNodeUrl = nodeUrl || 'http://127.0.0.1:3381';
+
+    // 1. Fetch authentic protocol reactions from Snapchain Read Node
+    const nodeRecords = await defaultNodeClient.getReactionsByFid(
+      fid,
+      type,
+      Math.max(limit, 30),
+      targetNodeUrl
+    );
+
+    // 2. Combine with in-memory session reactions for this user if any
+    const localHashes = Array.from(
+      (type === 'like'
+        ? this.userReactions.get(fid)?.likes
+        : this.userReactions.get(fid)?.recasts) || []
+    );
+
+    const recordMap = new Map<string, { targetFid: number; targetHash: string; timestamp: number }>();
+
+    for (const r of nodeRecords) {
+      recordMap.set(r.targetHash, r);
+    }
+
+    for (const h of localHashes) {
+      if (!recordMap.has(h)) {
+        const c = this.casts.get(h);
+        recordMap.set(h, {
+          targetFid: c?.fid || fid,
+          targetHash: h,
+          timestamp: Date.now(),
+        });
       }
     }
 
-    return result.sort((a, b) => b.timestamp - a.timestamp);
+    const allRecords = Array.from(recordMap.values());
+    if (allRecords.length === 0) {
+      return [];
+    }
+
+    // 3. Resolve target casts in parallel from the Snapchain Read Node
+    const resolvedCasts: FarcasterCast[] = [];
+    await Promise.allSettled(
+      allRecords.map(async (rec) => {
+        let cast: FarcasterCast | null | undefined = this.casts.get(rec.targetHash);
+        if (!cast) {
+          cast = await defaultNodeClient.getCastById(rec.targetFid, rec.targetHash, targetNodeUrl);
+        }
+        if (cast) {
+          // Resolve author profile if missing
+          if (!cast.author) {
+            const author = await this.getUser(cast.fid, targetNodeUrl);
+            if (author) cast.author = author;
+          }
+          this.addCast(cast);
+
+          const isViewer = Boolean(viewerFid && viewerFid === fid);
+          const viewerLiked = isViewer
+            ? (type === 'like' ? true : this.hasUserReacted(fid, cast.hash, 'like'))
+            : (viewerFid ? this.hasUserReacted(viewerFid, cast.hash, 'like') : false);
+          const viewerRecasted = isViewer
+            ? (type === 'recast' ? true : this.hasUserReacted(fid, cast.hash, 'recast'))
+            : (viewerFid ? this.hasUserReacted(viewerFid, cast.hash, 'recast') : false);
+
+          const decorated: FarcasterCast = {
+            ...cast,
+            timestamp: cast.timestamp || rec.timestamp,
+            reactions: {
+              likesCount: Math.max(type === 'like' ? 1 : 0, cast.reactions?.likesCount || (type === 'like' ? 1 : 0)),
+              recastsCount: Math.max(type === 'recast' ? 1 : 0, cast.reactions?.recastsCount || (type === 'recast' ? 1 : 0)),
+              likedByMe: !!viewerLiked,
+              recastByMe: !!viewerRecasted,
+            },
+          };
+          resolvedCasts.push(decorated);
+        }
+      })
+    );
+
+    // 4. Sort strictly reverse chronological (newest first)
+    return resolvedCasts.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
   }
 
   /**

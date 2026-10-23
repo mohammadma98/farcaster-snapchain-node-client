@@ -42,6 +42,13 @@ export interface NodeHealthResult {
   error?: string;
 }
 
+export interface ReactionRecord {
+  targetFid: number;
+  targetHash: string;
+  timestamp: number;
+  type: 'like' | 'recast';
+}
+
 export class SnapchainNodeClient {
   private defaultNodeUrl: string;
 
@@ -421,6 +428,12 @@ export class SnapchainNodeClient {
             parentUrl: castBody.parentUrl,
             parentCastId: castBody.parentCastId,
             mentions: castBody.mentions,
+            reactions: {
+              likesCount: 0,
+              recastsCount: 0,
+              likedByMe: false,
+              recastByMe: false,
+            },
           };
 
           const attr = identifyCastClient(cast);
@@ -488,6 +501,68 @@ export class SnapchainNodeClient {
     const fids = Array.from(followedFidSet);
     const users = Array.from(userMap.values());
     return { fids, users };
+  }
+
+  /**
+   * Fetch reactions (Likes or Recasts) for an FID directly from the Snapchain Read Node
+   */
+  async getReactionsByFid(
+    fid: number,
+    type: 'like' | 'recast',
+    pageSize = 30,
+    nodeUrl = this.defaultNodeUrl
+  ): Promise<ReactionRecord[]> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const snapchainVariant = type === 'like' ? 'Like' : 'Recast';
+    const hubbleVariant = type === 'like' ? 1 : 2;
+
+    const urlsToTry = [
+      `${cleanUrl}/v1/reactionsByFid?fid=${fid}&reaction_type=${snapchainVariant}&pageSize=${pageSize}&reverse=true`,
+      `${cleanUrl}/v1/reactionsByFid?fid=${fid}&reaction_type=${hubbleVariant}&pageSize=${pageSize}&reverse=true`,
+    ];
+
+    for (const url of urlsToTry) {
+      try {
+        const response = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const messages = data.messages || [];
+          const records: ReactionRecord[] = [];
+          const seen = new Set<string>();
+
+          for (const msg of messages) {
+            if (msg.data?.type && msg.data.type !== 'MESSAGE_TYPE_REACTION_ADD') continue;
+            const target = msg.data?.reactionBody?.targetCastId;
+            if (!target || !target.hash || !target.fid) continue;
+
+            const cleanHash = target.hash.startsWith('0x') ? target.hash : `0x${target.hash}`;
+            if (seen.has(cleanHash)) continue;
+            seen.add(cleanHash);
+
+            const farcasterTime = msg.data?.timestamp || 0;
+            const unixTimeResult = fromFarcasterTime(farcasterTime);
+            const timestamp = unixTimeResult.isOk() ? unixTimeResult.value : Date.now();
+
+            records.push({
+              targetFid: Number(target.fid),
+              targetHash: cleanHash,
+              timestamp,
+              type,
+            });
+          }
+
+          return records;
+        }
+      } catch {
+        // Fallback to next format if any
+      }
+    }
+
+    return [];
   }
 
   /**
@@ -589,6 +664,12 @@ export class SnapchainNodeClient {
             parentUrl: castBody.parentUrl,
             parentCastId: castBody.parentCastId,
             mentions: castBody.mentions,
+            reactions: {
+              likesCount: 0,
+              recastsCount: 0,
+              likedByMe: false,
+              recastByMe: false,
+            },
           };
 
           const attr = identifyCastClient(cast);

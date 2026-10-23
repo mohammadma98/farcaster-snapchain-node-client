@@ -546,8 +546,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
   ) => {
     setIsLoadingProfileCasts(true);
     try {
+      const activeSession = sessionRef.current || session;
+      const viewerParam = activeSession?.fid ? `&viewerFid=${activeSession.fid}` : '';
       const castsRes = await fetch(
-        `/api/users/${fidOrUsername}/casts?tab=${tab}&nodeUrl=${encodeURIComponent(targetNode)}`
+        `/api/users/${fidOrUsername}/casts?tab=${tab}&nodeUrl=${encodeURIComponent(targetNode)}${viewerParam}`
       );
       const castsData = await castsRes.json();
       if (Array.isArray(castsData.casts)) {
@@ -934,6 +936,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], !wasActive)[0] : null));
     }
     setThreadReplies((prev) => updateReactionInList(prev, !wasActive));
+    setProfileCasts((prev) => updateReactionInList(prev, !wasActive));
 
     // Backend call
     try {
@@ -959,6 +962,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], wasActive)[0] : null));
         }
         setThreadReplies((prev) => updateReactionInList(prev, wasActive));
+        setProfileCasts((prev) => updateReactionInList(prev, wasActive));
 
         const errMsg = data.error || data.nodeResult?.error || 'Reaction rejected by node';
         if (errMsg.includes('invalid signer')) {
@@ -974,6 +978,7 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setCurrentThreadCast((prev) => (prev ? updateReactionInList([prev], wasActive)[0] : null));
       }
       setThreadReplies((prev) => updateReactionInList(prev, wasActive));
+      setProfileCasts((prev) => updateReactionInList(prev, wasActive));
       showToast(`Network error: ${err.message}`);
     }
   };

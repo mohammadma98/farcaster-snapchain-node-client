@@ -24,41 +24,12 @@ export async function GET(
       );
     }
 
+    const viewerFid = searchParams.get('viewerFid') ? parseInt(searchParams.get('viewerFid')!, 10) : undefined;
     let resultCasts: FarcasterCast[] = [];
 
-    if (tab === 'likes') {
-      // 1. Check feedStore liked casts
-      resultCasts = feedStore.getUserLikedCasts(user.fid);
-
-      // If empty and viewing balajis or mohammad98, provide authentic protocol liked casts
-      if (resultCasts.length === 0) {
-        const feedCasts = await feedStore.getFeed({ limit, sourceFilter: 'all', nodeUrl });
-        // Select interesting casts to showcase
-        resultCasts = feedCasts.slice(0, 3).map((c) => ({
-          ...c,
-          reactions: {
-            ...c.reactions!,
-            likedByMe: true,
-            likesCount: Math.max(1, (c.reactions?.likesCount || 0) + 1),
-          },
-        }));
-      }
-    } else if (tab === 'recasts') {
-      // 2. Check feedStore recasted casts
-      resultCasts = feedStore.getUserRecastedCasts(user.fid);
-
-      if (resultCasts.length === 0) {
-        const feedCasts = await feedStore.getFeed({ limit, sourceFilter: 'all', nodeUrl });
-        // Recast sample protocol announcements
-        resultCasts = feedCasts.slice(1, 4).map((c) => ({
-          ...c,
-          reactions: {
-            ...c.reactions!,
-            recastByMe: true,
-            recastsCount: Math.max(1, (c.reactions?.recastsCount || 0) + 1),
-          },
-        }));
-      }
+    if (tab === 'likes' || tab === 'recasts') {
+      const reactionType = tab === 'likes' ? 'like' : 'recast';
+      resultCasts = await feedStore.getUserReactionCasts(user.fid, reactionType, limit, nodeUrl, viewerFid);
     } else if (tab === 'quotes') {
       // 3. User's casts that quote another cast
       const allUserCasts = await defaultNodeClient.getCastsByFid(user.fid, 50, nodeUrl);
