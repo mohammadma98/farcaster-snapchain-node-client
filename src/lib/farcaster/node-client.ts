@@ -69,7 +69,7 @@ export interface ReactionRecord {
 export class SnapchainNodeClient {
   private defaultNodeUrl: string;
 
-  constructor(nodeUrl = 'http://127.0.0.1:3381') {
+  constructor(nodeUrl = process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381') {
     this.defaultNodeUrl = nodeUrl.replace(/\/$/, '');
   }
 
@@ -322,41 +322,64 @@ export class SnapchainNodeClient {
   }
 
   /**
-   * Fetch user metadata (Bio, Display Name, PFP, Username) from the local node
+   * Fetch user metadata (Bio, Display Name, PFP, Username, Following, Followers) from the local node
    */
   async getUserProfile(fid: number, nodeUrl = this.defaultNodeUrl): Promise<FarcasterUser> {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
     const profile: FarcasterUser = { fid };
 
-    // 1. Query local Snapchain node
-    try {
-      const response = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(5000),
-      });
+    // Run metadata, following count, and follower count concurrently for sovereign speed
+    const [userDataPromise, followsPromise, followersPromise] = await Promise.allSettled([
+      // 1. Query local Snapchain node user data
+      (async () => {
+        try {
+          const response = await fetch(`${cleanUrl}/v1/userDataByFid?fid=${fid}`, {
+            headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(5000),
+          });
 
-      if (response.ok) {
-        const data = await response.json();
-        const messages = data.messages || [];
+          if (response.ok) {
+            const data = await response.json();
+            const messages = data.messages || [];
 
-        for (const msg of messages) {
-          const body = msg.data?.userDataBody || msg.data?.user_data_body || msg.userDataBody;
-          if (!body) continue;
+            for (const msg of messages) {
+              const body = msg.data?.userDataBody || msg.data?.user_data_body || msg.userDataBody;
+              if (!body) continue;
 
-          const typeStr = String(body.type || '').toUpperCase();
-          if (typeStr === '1' || typeStr === 'USER_DATA_TYPE_PFP' || typeStr === 'PFP') {
-            profile.pfpUrl = body.value;
-          } else if (typeStr === '2' || typeStr === 'USER_DATA_TYPE_DISPLAY' || typeStr === 'DISPLAY') {
-            profile.displayName = body.value;
-          } else if (typeStr === '3' || typeStr === 'USER_DATA_TYPE_BIO' || typeStr === 'BIO') {
-            profile.bio = body.value;
-          } else if (typeStr === '6' || typeStr === 'USER_DATA_TYPE_USERNAME' || typeStr === 'USERNAME') {
-            profile.username = body.value;
+              const typeStr = String(body.type || '').toUpperCase();
+              if (typeStr === '1' || typeStr === 'USER_DATA_TYPE_PFP' || typeStr === 'PFP') {
+                profile.pfpUrl = body.value;
+              } else if (typeStr === '2' || typeStr === 'USER_DATA_TYPE_DISPLAY' || typeStr === 'DISPLAY') {
+                profile.displayName = body.value;
+              } else if (typeStr === '3' || typeStr === 'USER_DATA_TYPE_BIO' || typeStr === 'BIO') {
+                profile.bio = body.value;
+              } else if (typeStr === '6' || typeStr === 'USER_DATA_TYPE_USERNAME' || typeStr === 'USERNAME') {
+                profile.username = body.value;
+              }
+            }
           }
+        } catch (err) {
+          console.warn(`Local node user profile lookup for FID ${fid} timed out or failed:`, err);
         }
-      }
-    } catch (err) {
-      console.warn(`Local node user profile lookup for FID ${fid} timed out or failed:`, err);
+      })(),
+
+      // 2. Dynamically compute authentic following count directly from local node
+      this.getFollowsByFid(fid, cleanUrl, 15),
+
+      // 3. Dynamically compute authentic follower count directly from local node
+      this.getFollowersByFid(fid, cleanUrl, 15),
+    ]);
+
+    if (followsPromise.status === 'fulfilled' && followsPromise.value) {
+      profile.followingCount = followsPromise.value.fids.length;
+    } else {
+      profile.followingCount = profile.followingCount ?? 0;
+    }
+
+    if (followersPromise.status === 'fulfilled' && followersPromise.value) {
+      profile.followerCount = followersPromise.value.count;
+    } else {
+      profile.followerCount = profile.followerCount ?? 0;
     }
 
     // 2. Check username proofs
@@ -386,14 +409,6 @@ export class SnapchainNodeClient {
       } catch {
         // ignore
       }
-    }
-
-    // 4. Dynamically compute authentic following count directly from local node
-    try {
-      const { fids: localFollows } = await this.getFollowsByFid(fid, cleanUrl);
-      profile.followingCount = localFollows.length;
-    } catch {
-      profile.followingCount = profile.followingCount || 0;
     }
 
     return profile;
@@ -497,7 +512,8 @@ export class SnapchainNodeClient {
    */
   async getFollowsByFid(
     fid: number,
-    nodeUrl = this.defaultNodeUrl
+    nodeUrl = this.defaultNodeUrl,
+    maxPages = 20
   ): Promise<{ fids: number[]; users: FarcasterUser[] }> {
     const cleanUrl = nodeUrl.replace(/\/$/, '');
     const followedFidSet = new Set<number>();
@@ -506,14 +522,13 @@ export class SnapchainNodeClient {
     try {
       let pageToken: string | undefined = undefined;
       let pages = 0;
-      const maxPages = 50; // Supports up to 5,000 followings (50 * 100)
 
       while (pages < maxPages) {
         const tokenQuery = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
         const fetchUrl = `${cleanUrl}/v1/linksByFid?fid=${fid}&link_type=follow&pageSize=100${tokenQuery}`;
         const res = await fetch(fetchUrl, {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(6000),
         });
 
         if (!res.ok) break;
@@ -540,6 +555,56 @@ export class SnapchainNodeClient {
     const fids = Array.from(followedFidSet);
     const users = Array.from(userMap.values());
     return { fids, users };
+  }
+
+  /**
+   * Fetch followers for an FID (incoming links of type 'follow')
+   * 100% sovereign: directly queries the local Snapchain node /v1/linksByTargetFid with pageToken pagination.
+   * Zero external API dependencies.
+   */
+  async getFollowersByFid(
+    targetFid: number,
+    nodeUrl = this.defaultNodeUrl,
+    maxPages = 20
+  ): Promise<{ fids: number[]; count: number }> {
+    const cleanUrl = nodeUrl.replace(/\/$/, '');
+    const followerFidSet = new Set<number>();
+
+    try {
+      let pageToken: string | undefined = undefined;
+      let pages = 0;
+
+      while (pages < maxPages) {
+        const tokenQuery = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+        const fetchUrl = `${cleanUrl}/v1/linksByTargetFid?target_fid=${targetFid}&link_type=follow&pageSize=100${tokenQuery}`;
+        const res = await fetch(fetchUrl, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!res.ok) break;
+
+        const resData: any = await res.json();
+        const messages: any[] = resData.messages || [];
+        if (messages.length === 0) break;
+
+        for (const msg of messages) {
+          const authorFid = msg.data?.fid;
+          if (typeof authorFid === 'number' && authorFid > 0) {
+            followerFidSet.add(authorFid);
+          }
+        }
+
+        pageToken = resData.nextPageToken;
+        pages++;
+        if (!pageToken) break;
+      }
+    } catch (err) {
+      console.warn(`Local node linksByTargetFid lookup for FID ${targetFid} failed:`, err);
+    }
+
+    const fids = Array.from(followerFidSet);
+    return { fids, count: fids.length };
   }
 
   /**

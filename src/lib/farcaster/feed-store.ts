@@ -21,7 +21,12 @@ class FeedStore {
    */
   public registerUser(user: FarcasterUser): FarcasterUser {
     const existing = this.users.get(user.fid) || { fid: user.fid };
-    const updated = { ...existing, ...user };
+    const updated: FarcasterUser = {
+      ...existing,
+      ...user,
+      followingCount: user.followingCount !== undefined ? user.followingCount : existing.followingCount,
+      followerCount: user.followerCount !== undefined ? user.followerCount : existing.followerCount,
+    };
     this.users.set(user.fid, updated);
     return updated;
   }
@@ -36,13 +41,14 @@ class FeedStore {
       if (this.users.has(fidNum)) {
         const cached = this.users.get(fidNum)!;
         const isDummy = (!cached.username || cached.username.startsWith('user_')) && (!cached.displayName || cached.displayName.startsWith('FID '));
-        if (!isDummy) {
+        const hasStats = cached.followingCount !== undefined && cached.followerCount !== undefined;
+        if (!isDummy && hasStats) {
           return cached;
         }
       }
 
       // Query local Snapchain node with public fallback
-      const targetUrl = nodeUrl || 'http://127.0.0.1:3381';
+      const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
       try {
         const profile = await defaultNodeClient.getUserProfile(fidNum, targetUrl);
         if (profile.username && !profile.username.startsWith('user_')) {
@@ -60,6 +66,8 @@ class FeedStore {
         displayName: `FID ${fidNum}`,
         pfpUrl: `https://avatar.vercel.sh/${fidNum}`,
         bio: `Farcaster user #${fidNum}`,
+        followingCount: 0,
+        followerCount: 0,
       };
       this.registerUser(fallback);
       return fallback;
@@ -69,26 +77,31 @@ class FeedStore {
     const cleanUsername = String(identifier).replace(/^@/, '').toLowerCase().trim();
     if (!cleanUsername) return null;
 
-    // Check memory cache first
+    // Check memory cache first (only if stats are present)
     for (const u of Array.from(this.users.values())) {
       if (u.username?.toLowerCase() === cleanUsername) {
-        return u;
+        if (u.followingCount !== undefined && u.followerCount !== undefined) {
+          return u;
+        }
       }
     }
 
     // Resolve username on the local Snapchain node
-    const targetUrl = nodeUrl || 'http://127.0.0.1:3381';
+    const targetUrl = nodeUrl || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
     try {
       const proof = await defaultNodeClient.lookupUsername(cleanUsername, targetUrl);
       if (proof && proof.fid) {
         const profile = await defaultNodeClient.getUserProfile(proof.fid, targetUrl);
         const resolved: FarcasterUser = {
+          ...profile,
           fid: proof.fid,
           username: profile.username || proof.name,
           displayName: profile.displayName || proof.name,
           pfpUrl: profile.pfpUrl || `https://avatar.vercel.sh/${proof.fid}`,
           bio: profile.bio || `Sovereign protocol participant on Snapchain`,
           custodyAddress: proof.owner,
+          followingCount: profile.followingCount ?? 0,
+          followerCount: profile.followerCount ?? 0,
         };
         this.registerUser(resolved);
         return resolved;
@@ -748,11 +761,23 @@ class FeedStore {
       const set = this.userFollows.get(viewerFid)!;
       if (isRemove) {
         set.delete(targetFid);
-        return false;
       } else {
         set.add(targetFid);
-        return true;
       }
+
+      // Update in-memory following count of viewer
+      const viewer = this.users.get(viewerFid);
+      if (viewer && viewer.followingCount !== undefined) {
+        viewer.followingCount = Math.max(0, viewer.followingCount + (isRemove ? -1 : 1));
+      }
+
+      // Update in-memory follower count of target
+      const target = this.users.get(targetFid);
+      if (target && target.followerCount !== undefined) {
+        target.followerCount = Math.max(0, target.followerCount + (isRemove ? -1 : 1));
+      }
+
+      return !isRemove;
     }
 
     return !isRemove;

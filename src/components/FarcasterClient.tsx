@@ -1163,7 +1163,27 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
     if (currentProfile?.fid === targetFid) {
       setIsFollowingCurrentProfile(!isCurrentlyFollowed);
+      setCurrentProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              followerCount: Math.max(0, (prev.followerCount ?? 0) + (isCurrentlyFollowed ? -1 : 1)),
+            }
+          : null
+      );
     }
+
+    setSession((prev) => {
+      if (!prev) return null;
+      const updatedSession: UserSession = {
+        ...prev,
+        followingCount: Math.max(0, (prev.followingCount ?? 0) + (isCurrentlyFollowed ? -1 : 1)),
+      };
+      try {
+        localStorage.setItem('farcaster_session', JSON.stringify(updatedSession));
+      } catch {}
+      return updatedSession;
+    });
 
     try {
       const res = await fetch('/api/links', {
@@ -1186,7 +1206,26 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         setFollowedFids(reverted);
         if (currentProfile?.fid === targetFid) {
           setIsFollowingCurrentProfile(isCurrentlyFollowed);
+          setCurrentProfile((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  followerCount: Math.max(0, (prev.followerCount ?? 0) + (isCurrentlyFollowed ? 1 : -1)),
+                }
+              : null
+          );
         }
+        setSession((prev) => {
+          if (!prev) return null;
+          const revertedSession: UserSession = {
+            ...prev,
+            followingCount: Math.max(0, (prev.followingCount ?? 0) + (isCurrentlyFollowed ? 1 : -1)),
+          };
+          try {
+            localStorage.setItem('farcaster_session', JSON.stringify(revertedSession));
+          } catch {}
+          return revertedSession;
+        });
         const errMsg = data.error || data.nodeResult?.error || 'Failed to update follow status';
         showToast(`Follow notice: ${errMsg}`);
       } else {
@@ -1200,7 +1239,26 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       setFollowedFids(reverted);
       if (currentProfile?.fid === targetFid) {
         setIsFollowingCurrentProfile(isCurrentlyFollowed);
+        setCurrentProfile((prev) =>
+          prev
+            ? {
+                ...prev,
+                followerCount: Math.max(0, (prev.followerCount ?? 0) + (isCurrentlyFollowed ? 1 : -1)),
+              }
+            : null
+        );
       }
+      setSession((prev) => {
+        if (!prev) return null;
+        const revertedSession: UserSession = {
+          ...prev,
+          followingCount: Math.max(0, (prev.followingCount ?? 0) + (isCurrentlyFollowed ? 1 : -1)),
+        };
+        try {
+          localStorage.setItem('farcaster_session', JSON.stringify(revertedSession));
+        } catch {}
+        return revertedSession;
+      });
       showToast(`Network error: ${err.message}`);
     }
   };

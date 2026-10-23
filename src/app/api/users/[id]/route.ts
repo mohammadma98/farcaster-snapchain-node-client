@@ -10,7 +10,7 @@ export async function GET(
   try {
     const { id } = params;
     const { searchParams } = new URL(request.url);
-    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://127.0.0.1:3381';
+    const nodeUrl = searchParams.get('nodeUrl') || process.env.FARCASTER_NODE_URL || 'http://162.35.98.172:3381';
 
     const user = await feedStore.getUser(id, nodeUrl);
 
