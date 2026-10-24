@@ -124,89 +124,252 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 
 ---
 
-## ⚠️ 开发者安全提示（类比 Unix `rm` 操作）
-
-> **开发者重要安全警示**：
-> 在任何开发者客户端中输入助记词或私钥，在安全层面上等同于在 Unix 系统中执行 `rm -rf` 指令：它赋予程序直接、底层的最高加密权限。
-> 
-> - **强烈建议仅使用专门的测试账户**或测试 FID 进行开发调试；
-> - **切勿输入存储有核心大额资产的冷钱包助记词**；
-> - 可在 Web 界面中直接点击 **"生成沙盒测试账户"（Generate Sandbox Account）** 按钮，一键创建独立测试账户，零风险体验全部协议功能。
-
----
-
-## 💻 交互式命令行工具 (CLI Reference)
-
-套件内置了可直连只读节点的 CLI 命令行工具（可在本地环境运行，或在 Docker 中通过 `./scripts/2-create-client.sh cli` 执行）：
-
-```bash
-# 查看只读节点运行状态与连接的 P2P 节点数
-npm run cli node-info
-
-# 查看指定 FID 的 Feed，并过滤掉来自 Warpcast 的动态
-npm run cli feed 2 --exclude Warpcast
-
-# 查看指定 FID 的 Feed，并只保留来自 Supercast 的动态
-npm run cli feed 2 --include Supercast
-
-# 按关键词过滤垃圾广告内容
-npm run cli feed 2 --keyword "airdrop"
-
-# 签发免 Gas 的应用密钥 (Signer)
-npm run cli create-signer <fid>
-
-# 直接向节点内存池广播发布一条 Cast
-npm run cli post-cast "Decentralized social via standalone Snapchain read node!"
-
-# 链上关注某位用户 (LinkAdd)
-npm run cli follow 3
-
-# 取消关注某位用户 (LinkRemove)
-npm run cli unfollow 3
-
-# 对特定 Cast 进行点赞或转播 (React)
-npm run cli react 2 0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8 like
-```
-
----
-
 ## 🔌 独立 REST API 文档
 
-客户端套件内置了完整的 RESTful 后端 API 接口（`/api/...`），这些接口直接与本地运行的 Snapchain 节点通信（`http://127.0.0.1:3381`），可轻松对接至您自己的外部系统或自动化 Agent 中：
+客户端套件内置了功能完善、零外部依赖的 RESTful API 引擎，运行于 `http://localhost:3000/api/...`（亦可通过 Cloudflare 生成的安全 HTTPS 域名直接外网调用）。每个接口均直接与您本地运行的 Snapchain 节点（`http://127.0.0.1:3381`）及本地高性能索引数据层无缝交互。
 
-### 1. 动态与 Cast
-* **`GET /api/feed?source=all&limit=40`**：获取近期协议动态，支持客户端来源过滤（如 `source=Warpcast`、`source=Supercast` 等）。
-* **`GET /api/casts/:hash`**：根据哈希查询 Cast 详情、父 Cast 及完整回复列表。
-* **`POST /api/casts`**：通过 Protobuf 二进制签名直接向节点内存池发布全新 Cast、引用 Cast 或回复。
+### 1. 节点健康度与 P2P 诊断
+实时监测本地 Snapchain 只读节点的同步进度、对等节点连通数与响应延迟。
 
-### 2. 社交互动与关注关系
-* **`POST /api/reactions`**：对目标 Cast 点赞、取消点赞、转播或取消转播。
-* **`POST /api/links`**：关注或取关特定目标 FID 用户。
-
-### 3. 用户与信息检索
-* **`GET /api/users/:id`**：根据数字 FID 或 `@username` 检索用户资料。
-* **`GET /api/users/:id/casts`**：获取指定用户发表的历史 Cast。
-* **`GET /api/users/search?q=query`**：模糊搜索用户名、显示名称或 FID。
-
-### 4. 身份认证与节点健康
-* **`POST /api/auth/login`**：基于助记词验证、推导托管地址并通过 EIP-712 自动派发 Ed25519 密钥。
-* **`POST /api/auth/sandbox`**：一键生成 12 词测试助记词与沙盒账户。
-* **`GET /api/node/status`**：实时返回节点健康度、网络延迟、连接对等节点数量及区块同步高度。
+* **`GET /api/node/status`**
+  ```bash
+  curl -s http://localhost:3000/api/node/status
+  ```
+  **响应示例 (`200 OK`):**
+  ```json
+  {
+    "status": "ok",
+    "health": {
+      "isOnline": true,
+      "latencyMs": 4,
+      "version": "1.0.0",
+      "isSyncing": false,
+      "peerCount": 24,
+      "numMessages": 85492031,
+      "error": null
+    },
+    "timestamp": 1729761000000
+  }
+  ```
 
 ---
 
-## 🧪 自动化测试与构建
+### 2. 动态时间线 (Feed) 与内容筛选
+拉取全网实时或关注动态流，支持精细化的客户端来源识别与关键词过滤。
 
-运行协议集成测试套件，验证二进制序列化、客户端过滤逻辑、关注消息构建与密码学推导：
+* **`GET /api/feed`**
+  * **查询参数 (Query Parameters):**
+    * `mode` *(string)*: 动态范围 — `'global'`（全局，默认）或 `'following'`（仅限关注列表，需传 `viewerFid`）。
+    * `limit` *(integer)*: 返回条数（默认：`20`，上限：`100`）。
+    * `cursor` *(integer)*: 时间戳游标，用于向前/向后无限滚动翻页。
+    * `source` *(string)*: 客户端来源过滤 — 如 `'all'`、`'Warpcast'`、`'Supercast'`、`'Direct Snapchain'` 等。
+    * `fid` *(integer)*: 仅获取指定作者 FID 发布的动态。
+    * `viewerFid` *(integer)*: 当前访问者的 FID，用于计算点赞、转播及关注状态。
+    * `client_fids` *(string)*: 逗号分隔的 App FID 列表，只保留指定客户端的内容。
+    * `exclude_client_fids` *(string)*: 逗号分隔的 App FID 列表，排除指定客户端的内容（例如过滤 Warpcast）。
+    * `only_self_registered` *(boolean)*: 为 `true` 时，仅展示已通过自注册验证的用户动态。
 
-```bash
-npm test
-```
+  ```bash
+  # 拉取最新的 25 条 Supercast 动态
+  curl -s "http://localhost:3000/api/feed?limit=25&source=Supercast"
+  ```
 
-打包 Next.js 生产环境应用：
-```bash
-npm run build
-```
+  **响应示例 (`200 OK`):**
+  ```json
+  {
+    "casts": [
+      {
+        "hash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8",
+        "author": {
+          "fid": 2,
+          "username": "v",
+          "displayName": "Varun Srinivasan",
+          "pfpUrl": "https://...",
+          "bio": "Building Farcaster"
+        },
+        "text": "Decentralized social networking on Snapchain.",
+        "timestamp": 1729760950,
+        "client": { "name": "Supercast", "fid": 414214 },
+        "reactions": { "likes": 42, "recasts": 12 },
+        "viewerContext": { "liked": false, "recasted": false }
+      }
+    ],
+    "nextCursor": 1729758000
+  }
+  ```
+
+---
+
+### 3. Cast 发布与完整回复树检索
+直接使用已签名的 Ed25519 二进制 Protobuf 格式向节点本地内存池提交新 Cast、引用转发或主题评论。
+
+* **`POST /api/casts`**
+  ```bash
+  curl -X POST http://localhost:3000/api/casts \
+    -H "Content-Type: application/json" \
+    -d '{
+      "fid": 320011,
+      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "text": "来自我的独立 Snapchain 节点的直发广播！",
+      "embeds": [{ "url": "https://farcaster.xyz" }],
+      "parentCastId": {
+        "fid": 2,
+        "hash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8"
+      }
+    }'
+  ```
+
+  **响应示例 (`200 OK`):**
+  ```json
+  {
+    "status": "ok",
+    "success": true,
+    "hash": "0x3e1a8b94c7d2e1f0a9b8c7d6e5f4a3b2c1d0e9f1",
+    "cast": {
+      "hash": "0x3e1a8b94c7d2e1f0a9b8c7d6e5f4a3b2c1d0e9f1",
+      "fid": 320011,
+      "text": "来自我的独立 Snapchain 节点的直发广播！"
+    }
+  }
+  ```
+
+* **`GET /api/casts/:hash`**
+  获取整条会话评论树，包括父级 Cast、祖先 Cast 以及按时间排列的所有下属回复。
+  ```bash
+  curl -s http://localhost:3000/api/casts/0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8
+  ```
+
+---
+
+### 4. 社交互动 (点赞与转播)
+向节点内存池提交或取消协议层级的点赞 (Like) 与转播 (Recast)。
+
+* **`POST /api/reactions`**
+  ```bash
+  curl -X POST http://localhost:3000/api/reactions \
+    -H "Content-Type: application/json" \
+    -d '{
+      "fid": 320011,
+      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "targetFid": 2,
+      "targetHash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8",
+      "type": "like",
+      "isRemove": false
+    }'
+  ```
+
+  **核心参数说明:**
+  * `type` *(string)*: 操作类型 — `'like'` (点赞) 或 `'recast'` (转播)。
+  * `isRemove` *(boolean)*: `false` 为新增互动；`true` 为撤销/取消该互动。
+
+---
+
+### 5. 社交图谱 (关注与取关)
+通过协议级 `LinkAdd` 与 `LinkRemove` 消息构建或解除链上关注关系。
+
+* **`POST /api/links`**
+  ```bash
+  curl -X POST http://localhost:3000/api/links \
+    -H "Content-Type: application/json" \
+    -d '{
+      "fid": 320011,
+      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "targetFid": 3,
+      "type": "follow",
+      "isRemove": false
+    }'
+  ```
+
+---
+
+### 6. 用户资料与个人动态历史
+查询链上身份、社交统计、个人简介及已发布的历史 Cast 列表。
+
+* **`GET /api/users/:id`**: 通过数字 FID（例如 `/api/users/2`）或用户名（例如 `/api/users/dwr.eth`）快速查询。
+* **`GET /api/users/:id/casts?limit=30`**: 按时间倒序拉取该用户发布的历史 Cast 列表。
+* **`GET /api/users/search?q=alice`**: 根据用户名、昵称或数字 FID 进行全库模糊检索。
+
+---
+
+### 7. 多链钱包资产余额与持仓
+实时查询指定托管地址或指定 FID 在 **Ethereum** 与 **Base** 主网上的代币持仓、现价与 USD 估值。
+
+* **`GET /api/wallet/tokens?fid=320011`**
+* **`GET /api/wallet/tokens?address=0x1234567890abcdef1234567890abcdef12345678`**
+
+  **响应示例 (`200 OK`):**
+  ```json
+  {
+    "status": "ok",
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "totalUsd": 1420.50,
+    "tokens": [
+      {
+        "id": "eth",
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": 0.45,
+        "price": 2700.00,
+        "usdValue": 1215.00,
+        "network": "Ethereum"
+      },
+      {
+        "id": "degen",
+        "name": "Degen",
+        "symbol": "DEGEN",
+        "decimals": 18,
+        "amount": 25000.0,
+        "price": 0.00822,
+        "usdValue": 205.50,
+        "network": "Base"
+      }
+    ]
+  }
+  ```
+
+---
+
+### 8. 多媒体图片上传接口
+上传用于嵌入 Cast 动态的图片资源，内置服务端 Magic Bytes 文件签名校验（支持 JPEG、PNG、GIF、WebP 格式，单文件上限 10 MB）。
+
+* **`POST /api/upload`** (Multipart Form Data，表单字段名为 `file`):
+  ```bash
+  curl -X POST http://localhost:3000/api/upload \
+    -F "file=@screenshot.png"
+  ```
+  **响应示例 (`200 OK`):**
+  ```json
+  {
+    "status": "ok",
+    "url": "/uploads/media_7f8a9b1c2d.png"
+  }
+  ```
+
+---
+
+### 9. 生态客户端注册表
+获取当前网络已识别的客户端应用列表及其对应的 App FID，方便前端进行归属标记或自由过滤。
+
+* **`GET /api/clients`**
+  ```json
+  {
+    "status": "ok",
+    "clients": [
+      { "name": "Warpcast", "fid": 9152 },
+      { "name": "Supercast", "fid": 414214 },
+      { "name": "Phaver", "fid": 9534 },
+      { "name": "Herocast", "fid": 194682 },
+      { "name": "Direct Snapchain", "fid": 0 }
+    ]
+  }
+  ```
+
+---
+
+### 10. 身份认证与免 Gas 密钥派发
+* **`POST /api/auth/login`**: 支持使用 12/24 词助记词或已有有效 Ed25519 签名私钥登录。自动派发并由以太坊托管地址完成 EIP-712 链下免 Gas 授权签名。
+* **`POST /api/auth/sandbox`**: 一键快速生成一套 12 词沙盒测试助记词与隔离测试账户，便于无风险本地调试。
 
 ---
 
