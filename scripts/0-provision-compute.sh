@@ -24,7 +24,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}${BOLD}================================================================${NC}"
-echo -e "${BLUE}${BOLD}   (0) Provision Compute for Farcaster Snapchain Read Node     ${NC}"
+echo -e "${BLUE}${BOLD}  [Step 1/3] Provision Compute & Prepare System Environment     ${NC}"
 echo -e "${BLUE}${BOLD}================================================================${NC}"
 
 # 1. Detect privilege level
@@ -36,6 +36,98 @@ else
     else
         echo -e "${RED}[ERROR] This script requires administrative privileges. Please run as root or install sudo.${NC}"
         exit 1
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# Pre-Flight: Check if Snapchain Read Node or Sync Worker is Already Active
+# ------------------------------------------------------------------------------
+CHECK_SNAPCHAIN_DIR="${HOME}/snapchain"
+if [ -f "/etc/snapchain/snapchain.conf" ]; then
+    # shellcheck source=/dev/null
+    source "/etc/snapchain/snapchain.conf" 2>/dev/null || true
+    CHECK_SNAPCHAIN_DIR="${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}"
+elif [ -f "${HOME}/.snapchain.conf" ]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.snapchain.conf" 2>/dev/null || true
+    CHECK_SNAPCHAIN_DIR="${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}"
+fi
+
+DOCKER_CMD="docker"
+if ! docker info >/dev/null 2>&1 && [ -n "$SUDO" ] && $SUDO docker info >/dev/null 2>&1; then
+    DOCKER_CMD="$SUDO docker"
+fi
+
+CONTAINER_ACTIVE=false
+if $DOCKER_CMD ps --format '{{.Names}}' 2>/dev/null | grep -q 'snapchain'; then
+    CONTAINER_ACTIVE=true
+fi
+
+HTTP_ACTIVE=false
+if curl -fs -m 2 http://localhost:3381/v1/info >/dev/null 2>&1; then
+    HTTP_ACTIVE=true
+fi
+
+ALL_SHARDS_PRESENT=true
+for s in 0 1 2; do
+    if [ ! -d "${CHECK_SNAPCHAIN_DIR}/.rocks/shard-${s}" ] || [ ! -f "${CHECK_SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete" ]; then
+        ALL_SHARDS_PRESENT=false
+    fi
+done
+
+# If node is fully up or all shards are already materialized, inform operator and jump straight to Step 3
+if [ "$HTTP_ACTIVE" == "true" ] || [ "$CONTAINER_ACTIVE" == "true" ] || [ "$ALL_SHARDS_PRESENT" == "true" ]; then
+    DB_SIZE="Unknown"
+    if [ -d "${CHECK_SNAPCHAIN_DIR}/.rocks" ]; then
+        DB_SIZE=$(du -sh "${CHECK_SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk '{print $1}')
+    fi
+    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ Existing Snapchain Read Node detected on this server!       ${NC}"
+    echo -e "${GREEN}${BOLD}================================================================${NC}"
+    echo -e "  • Container State: $( [ "$CONTAINER_ACTIVE" == "true" ] && echo -e "${GREEN}Running (snapchain)${NC}" || echo -e "${YELLOW}Stopped${NC}" )"
+    echo -e "  • HTTP API:        $( [ "$HTTP_ACTIVE" == "true" ] && echo -e "${GREEN}http://localhost:3381 (HTTP 200 OK)${NC}" || echo -e "${YELLOW}Starting up${NC}" )"
+    echo -e "  • Database Size:   ${BOLD}${DB_SIZE}${NC} on disk (${CHECK_SNAPCHAIN_DIR}/.rocks)"
+    echo -e "  • Target Data Dir: ${BOLD}${CHECK_SNAPCHAIN_DIR}${NC}\n"
+    echo -e "  Notice: Server compute and read node are already operational."
+    echo -e "${CYAN}${BOLD}• Proceeding directly to Step (3/3) to launch or update Client & Web UI...${NC}\n"
+
+    if [ -f "./scripts/2-create-client.sh" ]; then
+        exec bash "./scripts/2-create-client.sh"
+    elif [ -f "./2-create-client.sh" ]; then
+        exec bash "./2-create-client.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
+    else
+        TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+        chmod +x "$TMP_SCRIPT"
+        exec bash "$TMP_SCRIPT"
+    fi
+fi
+
+# Check if active background sync worker is running
+WORKER_PID_FILE="${CHECK_SNAPCHAIN_DIR}/.snapshot_worker.pid"
+if [ -f "$WORKER_PID_FILE" ]; then
+    W_PID=$(cat "$WORKER_PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$W_PID" ] && kill -0 "$W_PID" 2>/dev/null; then
+        echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+        echo -e "${GREEN}${BOLD}  ✓ Active background snapshot sync pipeline detected (PID: ${W_PID})!${NC}"
+        echo -e "${GREEN}${BOLD}================================================================${NC}"
+        echo -e "  Notice: Snapshot ingestion is actively running in the background."
+        echo -e "${CYAN}${BOLD}• Proceeding directly to Step (2/3) to attach to live progress monitor...${NC}\n"
+
+        if [ -f "./scripts/1-setup-read-node.sh" ]; then
+            exec bash "./scripts/1-setup-read-node.sh"
+        elif [ -f "./1-setup-read-node.sh" ]; then
+            exec bash "./1-setup-read-node.sh"
+        elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
+            exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
+        else
+            TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
+            curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+            chmod +x "$TMP_SCRIPT"
+            exec bash "$TMP_SCRIPT"
+        fi
     fi
 fi
 
@@ -78,14 +170,14 @@ prompt_user() {
 MODE="${1:-setup}"
 
 # Operational Specifications
-MIN_DISK_GB=750       # Optimized for RAM-assisted chunk-by-chunk streaming pipeline
+MIN_DISK_GB=600       # Strict minimum required free storage for RocksDB streaming pipeline
 BULK_DISK_GB=1400     # Required only for unpipelined bulk extraction
 REC_DISK_GB=1500      # Official full recommendation for archive retention
 
 # ------------------------------------------------------------------------------
 # 2. Hardware Inspection & Decoupled Matrix Evaluation
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[1/6] Inspecting System Hardware & Profile Classification...${NC}"
+echo -e "\n${CYAN}${BOLD}[1/4] Inspecting System Hardware & Profile Classification...${NC}"
 
 # Detect CPU cores
 CPUS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)
@@ -101,7 +193,7 @@ else
     CPU_LABEL="High-Throughput Dedicated (${CPUS} Cores)"
 fi
 
-echo -e "  - CPU Cores:      ${BOLD}${CPUS}${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_CPU}]${NC} (${CPU_LABEL})"
+echo -e "  • CPU Cores:      ${BOLD}${CPUS}${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_CPU}]${NC} (${CPU_LABEL})"
 
 # Detect RAM
 if [ -f /proc/meminfo ]; then
@@ -122,13 +214,13 @@ else
     RAM_LABEL="High Memory (${RAM_GB} GB - In-Memory Cache Enabled)"
 fi
 
-echo -e "  - System Memory:  ${BOLD}${RAM_GB} GB${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_RAM}]${NC} (${RAM_LABEL})"
-echo -e "  - Storage Bounds: Streaming Pipeline: ${BOLD}${MIN_DISK_GB} GB${NC} | Bulk Archive: ${BOLD}${BULK_DISK_GB} GB${NC} | Recommended: ${BOLD}${REC_DISK_GB} GB${NC}"
+echo -e "  • System Memory:  ${BOLD}${RAM_GB} GB${NC} -> ${GREEN}${BOLD}Profile [${PROFILE_RAM}]${NC} (${RAM_LABEL})"
+echo -e "  • Storage Bounds: Streaming Pipeline: ${BOLD}${MIN_DISK_GB} GB${NC} | Archive Retention: ${BOLD}${REC_DISK_GB} GB${NC}"
 
 # ------------------------------------------------------------------------------
 # 3. Network Ports Inspection
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[2/6] Inspecting Required Network Ports...${NC}"
+echo -e "\n${CYAN}${BOLD}[2/4] Inspecting Required Network Ports...${NC}"
 
 check_port_status() {
     local port="$1"
@@ -198,21 +290,32 @@ fi
 # ------------------------------------------------------------------------------
 # 4. Storage Analysis, Volume Selection & Disk Profile Classification
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[3/6] Analyzing Storage Volumes & Detecting Disk Medium...${NC}"
+echo -e "\n${CYAN}${BOLD}[3/4] Analyzing Storage Volumes & Target Directory...${NC}"
 
-# Parse real block storage devices with >= MIN_DISK_GB (750 GB) free space
+# Check if an existing RocksDB database already occupies disk space on the system
+EXISTING_ROCKS_DIR="${CHECK_SNAPCHAIN_DIR}/.rocks"
+EXISTING_ROCKS_GB=0
+if [ -d "$EXISTING_ROCKS_DIR" ]; then
+    EXISTING_ROCKS_GB=$(du -s -BG "$EXISTING_ROCKS_DIR" 2>/dev/null | awk '{gsub(/[^0-9]/,"",$1); print $1+0}' || echo 0)
+fi
+
+# Parse real block storage devices with >= MIN_DISK_GB (600 GB) effective free space
 ELIGIBLE_MOUNTS=()
 while IFS='|' read -r m_mount m_avail m_total m_used m_device; do
     if [ -n "$m_mount" ]; then
         ELIGIBLE_MOUNTS+=("${m_mount}|${m_avail}|${m_total}|${m_used}|${m_device}")
     fi
-done < <(df -P -BG 2>/dev/null | awk -v min_gb="$MIN_DISK_GB" 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
+done < <(df -P -BG 2>/dev/null | awk -v min_gb="$MIN_DISK_GB" -v rocks_gb="$EXISTING_ROCKS_GB" 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
     avail = $4; gsub(/[^0-9]/, "", avail);
     total = $2;
     used = $3;
     device = $1;
     mount = $6;
-    if (avail + 0 >= min_gb + 0) {
+    effective_avail = avail + 0;
+    if (rocks_gb + 0 > 0) {
+        effective_avail = effective_avail + rocks_gb;
+    }
+    if (effective_avail >= min_gb + 0) {
         print mount "|" avail "|" total "|" used "|" device;
     }
 }' | sort -t'|' -k2,2rn || true)
@@ -220,48 +323,21 @@ done < <(df -P -BG 2>/dev/null | awk -v min_gb="$MIN_DISK_GB" 'NR>1 && $1 ~ /^\/
 TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
 
 if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
-    echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}${BOLD}  ⚠ Storage Notice: Free Space is Below ${MIN_DISK_GB} GB Baseline       ${NC}"
-    echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}No storage volume on this server has at least ${MIN_DISK_GB} GB of free space.${NC}"
-    echo -e "Note: The streaming chunk pipeline requires ~550-750 GB to materialize RocksDB."
-    echo -e "\n${YELLOW}Searching for mounted volumes with at least 50 GB available...${NC}"
-
-    while IFS='|' read -r m_mount m_avail m_total m_used m_device; do
-        if [ -n "$m_mount" ] && [ "${m_avail:-0}" -ge 50 ]; then
-            ELIGIBLE_MOUNTS+=("${m_mount}|${m_avail}|${m_total}|${m_used}|${m_device}")
-        fi
-    done < <(df -P -BG 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
+    MAX_AVAIL_GB=$(df -P -BG 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /^\/dev\/loop/ && $6 !~ /^\/boot/ {
         avail = $4; gsub(/[^0-9]/, "", avail);
-        total = $2;
-        used = $3;
-        device = $1;
-        mount = $6;
-        print mount "|" avail "|" total "|" used "|" device;
-    }' | sort -t'|' -k2,2rn || true)
+        if (avail + 0 > max_v) max_v = avail + 0;
+    } END {print max_v + 0}')
 
-    TOTAL_ELIGIBLE=${#ELIGIBLE_MOUNTS[@]}
-
-    if [ "$TOTAL_ELIGIBLE" -eq 0 ]; then
-        echo -e "\n${RED}${BOLD}[FATAL ERROR] Insufficient Free Storage Space (< 50 GB)!${NC}"
-        echo -e "${RED}Server does not have enough storage space to bootstrap a Snapchain node.${NC}"
-        df -h -x tmpfs -x devtmpfs -x overlay 2>/dev/null || df -h
-        exit 1
-    fi
-
-    if [ "$MODE" != "check" ]; then
-        echo -e "${YELLOW}Warning: Proceeding with < ${MIN_DISK_GB} GB may cause disk exhaustion during sync.${NC}"
-        CONFIRM_DISK=$(prompt_user "Do you want to proceed with available storage anyway? [y/N]: " "n")
-        case "$CONFIRM_DISK" in
-            [yY]|[yY][eE][sS])
-                echo -e "  ${GREEN}✓ Proceeding with available volume.${NC}\n"
-                ;;
-            *)
-                echo -e "${RED}[ABORTED] Setup stopped by operator.${NC}"
-                exit 1
-                ;;
-        esac
-    fi
+    echo -e "\n${RED}${BOLD}================================================================${NC}"
+    echo -e "${RED}${BOLD}  [ERROR] INSUFFICIENT STORAGE SPACE (< 600 GB)                 ${NC}"
+    echo -e "${RED}${BOLD}================================================================${NC}"
+    echo -e "${RED}Available storage on host: ${MAX_AVAIL_GB} GB${NC}"
+    echo -e "${RED}Minimum required storage:  ${MIN_DISK_GB} GB${NC}"
+    echo -e "${RED}A minimum of 600 GB free disk space is strictly required to stream${NC}"
+    echo -e "${RED}and materialize the Snapchain RocksDB database.${NC}"
+    echo -e "${RED}Execution aborted to protect host storage from exhaustion.${NC}"
+    echo -e "${RED}${BOLD}================================================================${NC}\n"
+    exit 1
 fi
 
 SELECTED_MOUNT=""
@@ -402,38 +478,30 @@ $SUDO chmod 775 "$SELECTED_SNAPCHAIN_DIR"
 echo -e "  ${GREEN}✓ Target directory verified and writable:${NC} ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
 
 # ------------------------------------------------------------------------------
-# 5. Interactive Observability & Metrics Stack Configuration
+# 5. System Configuration, Observability & Dependencies
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[4/6] Configuring Observability & Monitoring Stack (Grafana/StatsD)...${NC}"
-echo -e "  The monitoring stack includes Grafana (Dashboard) and StatsD (Metrics Collector)."
-echo -e "  ${YELLOW}Notice: These services consume ~700 MB RAM, additional CPU cycles, and write"
-echo -e "  continuous time-series metrics to disk. They are NOT required for node operation.${NC}"
+echo -e "\n${CYAN}${BOLD}[4/4] Applying System Configurations & Dependencies...${NC}"
 
+# Observability Stack Choice
 if [ "$PROFILE_DISK" == "D1" ] || [ "$PROFILE_RAM" == "R1" ] || [ "$PROFILE_CPU" == "C1" ]; then
-    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${YELLOW}Disable Metrics (N)${NC} to protect CPU/RAM/Disk resources."
     DEFAULT_METRICS="n"
 else
-    echo -e "  • ${BOLD}Engineering Recommendation for this host:${NC} ${GREEN}Enable Metrics (Y)${NC} (host has sufficient resources)."
     DEFAULT_METRICS="y"
 fi
 
-ENABLE_METRICS_CHOICE=$(prompt_user "Would you like to install and run the Metrics stack (Grafana/StatsD)? [y/N]: " "$DEFAULT_METRICS")
+ENABLE_METRICS_CHOICE=$(prompt_user "  Enable Grafana & StatsD monitoring dashboard (Port 3005)? [y/N]: " "$DEFAULT_METRICS")
 case "$ENABLE_METRICS_CHOICE" in
     [yY]|[yY][eE][sS])
         METRICS_ACTIVE=true
-        echo -e "  ${GREEN}✓ Metrics stack enabled (Grafana mapped to port 3005).${NC}"
+        echo -e "    ${GREEN}✓ Metrics stack enabled (Grafana on port 3005).${NC}"
         ;;
     *)
         METRICS_ACTIVE=false
-        echo -e "  ${GREEN}✓ Running in Lean Mode: Metrics disabled to preserve host resources.${NC}"
+        echo -e "    ${GREEN}✓ Running in Lean Mode: Metrics disabled to preserve host resources.${NC}"
         ;;
 esac
 
-# ------------------------------------------------------------------------------
-# 6. Advanced Adaptive Memory & Swap Engineering (ZRAM vs Disk Swap)
-# ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[5/6] Configuring Memory Subsystem & Swap Architecture...${NC}"
-
+# Advanced Adaptive Memory & Swap Engineering
 ZRAM_ACTIVE=false
 
 if [ "$PROFILE_RAM" == "R1" ]; then
@@ -442,7 +510,6 @@ if [ "$PROFILE_RAM" == "R1" ]; then
     # 1. Purge or deactivate rotational HDD swap to prevent catastrophic I/O thrashing
     if [ "$PROFILE_DISK" == "D1" ]; then
         if [ -f /swapfile ] && swapon --show | grep -q '/swapfile'; then
-            echo -e "    ${YELLOW}⚠ Active swapfile detected on mechanical HDD. Deactivating to prevent I/O freeze...${NC}"
             $SUDO swapoff /swapfile 2>/dev/null || true
             $SUDO sed -i '\|^/swapfile|d' /etc/fstab 2>/dev/null || true
             echo -e "    ${GREEN}✓ Rotational HDD swap successfully disabled.${NC}"
@@ -450,12 +517,10 @@ if [ "$PROFILE_RAM" == "R1" ]; then
     fi
 
     # 2. Configure ZRAM (RAM Compression via LZ4)
-    echo -e "    Attempting to initialize high-speed compressed in-memory swap (ZRAM)..."
     if $SUDO modprobe zram num_devices=1 2>/dev/null; then
         if [ -b /dev/zram0 ]; then
             $SUDO swapoff /dev/zram0 2>/dev/null || true
             echo lz4 | $SUDO tee /sys/block/zram0/comp_algorithm > /dev/null 2>&1 || true
-            # Allocate 2.5 GB compressed virtual swap
             echo 2684354560 | $SUDO tee /sys/block/zram0/disksize > /dev/null 2>&1 || true
             $SUDO mkswap /dev/zram0 > /dev/null 2>&1 || true
             $SUDO swapon -p 100 /dev/zram0 > /dev/null 2>&1 || true
@@ -465,10 +530,8 @@ if [ "$PROFILE_RAM" == "R1" ]; then
     fi
 
     if [ "$ZRAM_ACTIVE" != "true" ]; then
-        echo -e "    ${YELLOW}Notice: Kernel zram module not available in this virtual environment.${NC}"
         SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
         if [ "$SWAP_TOTAL_KB" -lt 1048576 ] && [ "$PROFILE_DISK" != "D1" ]; then
-            echo -e "    Allocating 2 GB emergency swapfile on non-rotational disk..."
             $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
             $SUDO chmod 600 /swapfile
             $SUDO mkswap /swapfile > /dev/null 2>&1 || true
@@ -477,47 +540,38 @@ if [ "$PROFILE_RAM" == "R1" ]; then
         fi
     fi
 else
-    echo -e "  • Profile [${PROFILE_RAM}] detected: Sufficient host memory available (${RAM_GB} GB)."
+    echo -e "  • Memory Subsystem: Sufficient host memory available (${RAM_GB} GB)."
 fi
 
-# ------------------------------------------------------------------------------
-# 7. Granular Kernel & I/O Engine Tuning (Adaptive /etc/sysctl.d)
-# ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}[6/6] Applying Adaptive Kernel & Storage Optimization...${NC}"
-
-# Base P2P network capabilities
+# Granular Kernel & I/O Engine Tuning
+echo -e "  • Applying Adaptive Kernel & Network Tuning..."
 $SUDO sysctl -w fs.file-max=2097152 > /dev/null 2>&1 || true
 $SUDO sysctl -w net.core.somaxconn=65535 > /dev/null 2>&1 || true
 $SUDO sysctl -w net.ipv4.tcp_max_syn_backlog=65535 > /dev/null 2>&1 || true
 $SUDO sysctl -w vm.max_map_count=262144 > /dev/null 2>&1 || true
 
-# Tailored Dirty Pages & Virtual Memory parameters based on Disk & RAM Profile
 if [ "$PROFILE_DISK" == "D1" ]; then
-    # Rotational HDD: Flush dirty pages immediately in tiny increments to prevent disk head stalls
     VM_DIRTY_BG=3
     VM_DIRTY=6
     VM_VFS_PRESSURE=50
     VM_SWAPPINESS=10
 elif [ "$PROFILE_DISK" == "D2" ]; then
-    # Standard SSD
     VM_DIRTY_BG=10
     VM_DIRTY=20
     VM_VFS_PRESSURE=100
     VM_SWAPPINESS=20
 else
-    # D3 (NVMe)
     VM_DIRTY_BG=15
     VM_DIRTY=30
     VM_VFS_PRESSURE=100
     VM_SWAPPINESS=10
 fi
 
-# Network socket buffer scaling
 if [ "$PROFILE_RAM" == "R1" ]; then
-    NET_RMEM=8388608   # 8 MB to protect low-RAM host
+    NET_RMEM=8388608
     NET_WMEM=8388608
 else
-    NET_RMEM=16777216  # 16 MB standard P2P gossip buffers
+    NET_RMEM=16777216
     NET_WMEM=16777216
 fi
 
@@ -528,10 +582,8 @@ $SUDO sysctl -w vm.swappiness=$VM_SWAPPINESS > /dev/null 2>&1 || true
 $SUDO sysctl -w net.core.rmem_max=$NET_RMEM > /dev/null 2>&1 || true
 $SUDO sysctl -w net.core.wmem_max=$NET_WMEM > /dev/null 2>&1 || true
 
-# Persist sysctl parameters
 cat <<EOF | $SUDO tee /etc/sysctl.d/99-snapchain.conf > /dev/null
 # Farcaster Snapchain Optimized Kernel Parameters
-# Generated for Profile: CPU=[${PROFILE_CPU}], RAM=[${PROFILE_RAM}], Disk=[${PROFILE_DISK}]
 fs.file-max = 2097152
 net.core.somaxconn = 65535
 net.ipv4.tcp_max_syn_backlog = 65535
@@ -546,21 +598,18 @@ net.ipv4.udp_rmem_min = 16384
 net.ipv4.udp_wmem_min = 16384
 EOF
 
-echo -e "  ${GREEN}✓ Kernel sysctl parameters persisted to /etc/sysctl.d/99-snapchain.conf${NC}"
+echo -e "    ${GREEN}✓ Kernel sysctl parameters persisted to /etc/sysctl.d/99-snapchain.conf${NC}"
 
-# Mount Optimization (noatime & nodiratime to eliminate metadata writes on reads)
+# Mount Optimization (noatime & nodiratime)
 if [ -f /etc/fstab ] && [ -n "$SELECTED_MOUNT" ]; then
     if ! grep -E "\s${SELECTED_MOUNT}\s.*noatime" /etc/fstab > /dev/null 2>&1; then
-        echo -e "  • Filesystem metadata optimization: applying noatime,nodiratime to ${SELECTED_MOUNT}..."
         $SUDO mount -o remount,noatime,nodiratime "$SELECTED_MOUNT" 2>/dev/null || true
-        echo -e "    ${GREEN}✓ noatime,nodiratime active on ${SELECTED_MOUNT} (eliminates random write overhead on file & directory reads).${NC}"
+        echo -e "    ${GREEN}✓ noatime,nodiratime active on ${SELECTED_MOUNT}${NC}"
     fi
 fi
 
-# ------------------------------------------------------------------------------
-# Verify & Install Foundational Packages & Python Runtime
-# ------------------------------------------------------------------------------
-echo -e "  • Verifying Python Runtime & Foundational Packages (python3, jq, pigz, curl, git)..."
+# Verify & Install Foundational Packages (Silent)
+echo -e "  • Verifying foundational packages (python3, jq, pigz, curl, tar, git)..."
 MISSING_PKGS=()
 for p in python3 jq pigz curl tar git; do
     if ! command -v "$p" &> /dev/null; then
@@ -569,35 +618,43 @@ for p in python3 jq pigz curl tar git; do
 done
 
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    echo -e "    - Installing missing foundational packages: ${YELLOW}${MISSING_PKGS[*]}${NC}..."
+    echo -e "    Installing missing packages: ${MISSING_PKGS[*]}..."
+    PKG_ERR=0
     if command -v apt-get &> /dev/null; then
         export DEBIAN_FRONTEND=noninteractive
-        $SUDO apt-get update -qq > /dev/null 2>&1 || true
-        $SUDO apt-get install -y -qq "${MISSING_PKGS[@]}" > /dev/null 2>&1 || $SUDO apt-get install -y "${MISSING_PKGS[@]}"
+        $SUDO apt-get update -qq > /tmp/snapchain_pkg.log 2>&1 || true
+        $SUDO apt-get install -y -qq "${MISSING_PKGS[@]}" >> /tmp/snapchain_pkg.log 2>&1 || PKG_ERR=$?
     elif command -v dnf &> /dev/null; then
-        $SUDO dnf install -y -q "${MISSING_PKGS[@]}" > /dev/null 2>&1 || true
+        $SUDO dnf install -y -q "${MISSING_PKGS[@]}" > /tmp/snapchain_pkg.log 2>&1 || PKG_ERR=$?
     elif command -v yum &> /dev/null; then
-        $SUDO yum install -y -q "${MISSING_PKGS[@]}" > /dev/null 2>&1 || true
+        $SUDO yum install -y -q "${MISSING_PKGS[@]}" > /tmp/snapchain_pkg.log 2>&1 || PKG_ERR=$?
+    fi
+    if [ "$PKG_ERR" -ne 0 ]; then
+        echo -e "    ${RED}[ERROR] Package installation failed. Log details:${NC}"
+        tail -n 10 /tmp/snapchain_pkg.log 2>/dev/null || true
+        exit 1
     fi
 fi
-echo -e "    ${GREEN}✓ Foundational packages & Python runtime verified:${NC} $(python3 --version 2>/dev/null || echo 'python3')"
+echo -e "    ${GREEN}✓ Foundational packages verified.${NC}"
 
-# ------------------------------------------------------------------------------
-# Intelligent Docker Engine & Container Runtime Verification
-# ------------------------------------------------------------------------------
+# Verify & Install Docker Engine (Silent)
 echo -e "  • Verifying Docker Engine & Container Runtime..."
 if ! command -v docker &> /dev/null; then
-    echo "    - Installing official Docker Engine via get.docker.com..."
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    $SUDO sh /tmp/get-docker.sh
+    echo -e "    Installing official Docker Engine via get.docker.com..."
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null
+    if ! $SUDO sh /tmp/get-docker.sh > /tmp/docker_install.log 2>&1; then
+        echo -e "    ${RED}[ERROR] Docker installation failed. Log details:${NC}"
+        tail -n 15 /tmp/docker_install.log 2>/dev/null || true
+        rm -f /tmp/get-docker.sh
+        exit 1
+    fi
     rm -f /tmp/get-docker.sh
-    
     if [ -n "$SUDO" ] && [ -n "${USER:-}" ]; then
         $SUDO usermod -aG docker "$USER" 2>/dev/null || true
     fi
     echo -e "    ${GREEN}✓ Docker Engine successfully installed.${NC}"
 else
-    echo -e "    ${GREEN}✓ Docker is active: $(docker --version)${NC}"
+    echo -e "    ${GREEN}✓ Docker Engine is active: $(docker --version 2>/dev/null || echo 'installed')${NC}"
 fi
 
 # Ensure Docker service is enabled and running
@@ -607,12 +664,11 @@ elif command -v service &> /dev/null; then
     $SUDO service docker start > /dev/null 2>&1 || true
 fi
 
-# Ensure Docker Compose (V2 plugin or standalone) is installed and operational
+# Ensure Docker Compose plugin is present
 if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/null; then
     if [ -n "$SUDO" ] && $SUDO docker compose version &>/dev/null; then
         :
     else
-        echo "    - Installing Docker Compose plugin..."
         if command -v apt-get &>/dev/null; then
             export DEBIAN_FRONTEND=noninteractive
             $SUDO apt-get install -y -qq docker-compose-plugin > /dev/null 2>&1 || true
@@ -621,7 +677,7 @@ if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/nu
 fi
 
 # Firewall Configuration (UFW)
-echo -e "  • Configuring host firewall rules (UFW)..."
+echo -e "  • Configuring host firewall (UFW)..."
 if command -v ufw &> /dev/null; then
     $SUDO ufw allow 22/tcp comment 'SSH Remote Access' > /dev/null 2>&1 || true
     $SUDO ufw allow 3381/tcp comment 'Snapchain HTTP API & submitMessage' > /dev/null 2>&1 || true
@@ -631,23 +687,23 @@ if command -v ufw &> /dev/null; then
     $SUDO ufw allow 3000/tcp comment 'Farcaster Web Client' > /dev/null 2>&1 || true
     if [ "$METRICS_ACTIVE" == "true" ]; then
         $SUDO ufw allow 3005/tcp comment 'Grafana Metrics Dashboard' > /dev/null 2>&1 || true
-        echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3005, 3381, 3382, 3383).${NC}"
+        echo -e "    ${GREEN}✓ Firewall rules configured (Ports: 22, 3000, 3005, 3381, 3382, 3383).${NC}"
     else
-        echo -e "    ${GREEN}✓ UFW firewall rules configured (Ports 22, 3000, 3381, 3382, 3383).${NC}"
+        echo -e "    ${GREEN}✓ Firewall rules configured (Ports: 22, 3000, 3381, 3382, 3383).${NC}"
     fi
 else
-    echo -e "    ${YELLOW}• UFW firewall not active. Ensure cloud security groups permit required ports.${NC}"
+    echo -e "    ${GREEN}✓ UFW firewall not active (Ensure cloud security groups permit ports 3381, 3382, 3383, 3000).${NC}"
 fi
 
 # ------------------------------------------------------------------------------
-# 8. Persist System Matrix State Configuration
+# Persist System Matrix State Configuration
 # ------------------------------------------------------------------------------
 $SUDO mkdir -p /etc/snapchain
 cat <<EOF | $SUDO tee /etc/snapchain/snapchain.conf > /dev/null
 # Farcaster Snapchain Node System Configuration
 # Generated by 0-provision-compute.sh (Decoupled Matrix Architecture)
 PROVISIONED=true
-PROVISION_VERSION="2.2.0"
+PROVISION_VERSION="2.3.0"
 PROVISION_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # Decoupled Hardware Matrix
@@ -676,9 +732,9 @@ cat /etc/snapchain/snapchain.conf > "${HOME}/.snapchain.conf" 2>/dev/null || tru
 cat /etc/snapchain/snapchain.conf > "${SELECTED_SNAPCHAIN_DIR}/.snapchain.env" 2>/dev/null || true
 
 echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-echo -e "${GREEN}${BOLD}  ✓ Step (0) Complete: Server Provisioned with Adaptive Matrix! ${NC}"
+echo -e "${GREEN}${BOLD}  ✓ Step (1/3) Complete: Server Provisioned Successfully!       ${NC}"
 echo -e "${GREEN}${BOLD}================================================================${NC}"
-echo -e "Matrix Configuration Summary:"
+echo -e "Configuration Summary:"
 echo -e "  - CPU Profile:     ${BOLD}[${PROFILE_CPU}]${NC} (${CPU_LABEL})"
 echo -e "  - RAM Profile:     ${BOLD}[${PROFILE_RAM}]${NC} (${RAM_LABEL})"
 echo -e "  - Disk Profile:    ${BOLD}[${PROFILE_DISK}]${NC} (${DISK_LABEL})"
@@ -687,28 +743,19 @@ echo -e "  - Target Data Dir: ${BOLD}${SELECTED_SNAPCHAIN_DIR}${NC}"
 echo -e "  - Configuration:   Saved to ${BOLD}/etc/snapchain/snapchain.conf${NC}\n"
 
 # ------------------------------------------------------------------------------
-# 9. Interactive Prompt to Execute Step (1)
+# Direct Automatic Transition to Step (2/3)
 # ------------------------------------------------------------------------------
-AUTO_STEP1=$(prompt_user "Would you like to automatically run Step (1) [Setup Snapchain Read Node] now? [Y/n]: " "y")
+echo -e "${CYAN}${BOLD}• Automatically proceeding to Step (2/3) [Setup Read Node]...${NC}\n"
 
-case "$AUTO_STEP1" in
-    [yY]|[yY][eE][sS])
-        echo -e "\n${CYAN}${BOLD}Launching Step (1): Setting up Standalone Snapchain Read Node...${NC}\n"
-        if [ -f "./scripts/1-setup-read-node.sh" ]; then
-            exec bash "./scripts/1-setup-read-node.sh"
-        elif [ -f "./1-setup-read-node.sh" ]; then
-            exec bash "./1-setup-read-node.sh"
-        elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
-            exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
-        else
-            TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
-            curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
-            chmod +x "$TMP_SCRIPT"
-            exec bash "$TMP_SCRIPT"
-        fi
-        ;;
-    *)
-        echo -e "\nNext step: Run Command (1) whenever you are ready to start your Snapchain Read Node:"
-        echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash${NC}\n"
-        ;;
-esac
+if [ -f "./scripts/1-setup-read-node.sh" ]; then
+    exec bash "./scripts/1-setup-read-node.sh"
+elif [ -f "./1-setup-read-node.sh" ]; then
+    exec bash "./1-setup-read-node.sh"
+elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
+    exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
+else
+    TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
+    curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+    chmod +x "$TMP_SCRIPT"
+    exec bash "$TMP_SCRIPT"
+fi

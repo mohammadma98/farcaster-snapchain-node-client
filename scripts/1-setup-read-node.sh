@@ -23,7 +23,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}${BOLD}================================================================${NC}"
-echo -e "${BLUE}${BOLD}        (1) Set up a Standalone Snapchain Read Node            ${NC}"
+echo -e "${BLUE}${BOLD}        [Step 2/3] Set up Standalone Snapchain Read Node        ${NC}"
 echo -e "${BLUE}${BOLD}================================================================${NC}"
 
 # Helper function to read user input interactively even when piped via curl | bash
@@ -255,6 +255,114 @@ if ! touch .write_test 2>/dev/null; then
 fi
 rm -f .write_test 2>/dev/null || true
 
+# ------------------------------------------------------------------------------
+# Pre-Flight State & Database Inspection
+# ------------------------------------------------------------------------------
+resolve_docker_runtime
+
+WORKER_PID_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.pid"
+WORKER_STATUS_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.status"
+WORKER_DONE_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.done"
+WORKER_LOG_FILE="${SNAPCHAIN_DIR}/.snapshot_worker.log"
+
+WORKER_PID=$(cat "$WORKER_PID_FILE" 2>/dev/null || echo "")
+IS_WORKER_ACTIVE=false
+if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+    IS_WORKER_ACTIVE=true
+fi
+
+# Check if node container is already running or database is already fully materialized
+CONTAINER_NAME=$($DOCKER_BIN ps --filter "name=snapchain" --filter "status=running" --format "{{.Names}}" 2>/dev/null | grep -E "snapchain.*snapchain|snapchain" | head -n 1 || echo "")
+CONTAINER_RUNNING=false
+if [ -n "$CONTAINER_NAME" ]; then
+    CONTAINER_RUNNING=true
+fi
+
+HTTP_API_ACTIVE=false
+if curl -fs -m 2 http://localhost:3381/v1/info >/dev/null 2>&1; then
+    HTTP_API_ACTIVE=true
+fi
+
+ALL_SHARDS_DONE=true
+for s in 0 1 2; do
+    s_dir="${SNAPCHAIN_DIR}/.rocks/shard-${s}"
+    s_done="${SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete"
+    if [ ! -f "$s_done" ] || [ ! -d "$s_dir" ]; then
+        ALL_SHARDS_DONE=false
+    fi
+done
+
+# Priority 1: If database is already complete or container is running, PROTECT existing database & skip sync
+if [ "$ALL_SHARDS_DONE" == "true" ] || { [ "$CONTAINER_RUNNING" == "true" ] && [ "$HTTP_API_ACTIVE" == "true" ]; }; then
+    DB_SIZE="Unknown"
+    if [ -d "${SNAPCHAIN_DIR}/.rocks" ]; then
+        DB_SIZE=$(du -sh "${SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk '{print $1}')
+    fi
+    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ Existing Snapchain node and RocksDB database detected!      ${NC}"
+    echo -e "${GREEN}${BOLD}================================================================${NC}"
+    echo -e "  • Database Path:   ${BOLD}${SNAPCHAIN_DIR}/.rocks${NC} (Shards 0, 1, 2 verified)"
+    echo -e "  • Database Size:   ${BOLD}${DB_SIZE}${NC} on disk"
+    echo -e "  • Container State: $( [ "$CONTAINER_RUNNING" == "true" ] && echo -e "${GREEN}Running (snapchain)${NC}" || echo -e "${YELLOW}Stopped${NC}" )"
+    echo -e "  • HTTP Endpoint:   $( [ "$HTTP_API_ACTIVE" == "true" ] && echo -e "${GREEN}http://localhost:3381 (HTTP 200 OK)${NC}" || echo -e "${YELLOW}Starting up${NC}" )"
+    echo -e "\n  Notice: Skipping snapshot download to protect existing database."
+
+    # Ensure container is started if stopped
+    if [ "$CONTAINER_RUNNING" != "true" ] && [ -f "${SNAPCHAIN_DIR}/docker-compose.yml" ]; then
+        echo -e "  • Starting Snapchain Docker container..."
+        $COMPOSE_CMD up -d >/dev/null 2>&1 || true
+    fi
+
+    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ Step (2/3) Complete: Existing Read Node verified and active. ${NC}"
+    echo -e "${GREEN}${BOLD}================================================================${NC}\n"
+
+    echo -e "${CYAN}${BOLD}• Automatically proceeding to Step (3/3) [Launch Web Client & Dashboard]...${NC}\n"
+
+    if [ -f "./scripts/2-create-client.sh" ]; then
+        exec bash "./scripts/2-create-client.sh"
+    elif [ -f "./2-create-client.sh" ]; then
+        exec bash "./2-create-client.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
+    else
+        TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+        chmod +x "$TMP_SCRIPT"
+        exec bash "$TMP_SCRIPT"
+    fi
+fi
+
+# Priority 2: Storage capacity validation (only if worker is NOT actively running)
+if [ "$IS_WORKER_ACTIVE" != "true" ]; then
+    COMPLETED_SHARDS_COUNT=0
+    for s in 0 1 2; do
+        if [ -f "${SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete" ] && [ -d "${SNAPCHAIN_DIR}/.rocks/shard-${s}" ]; then
+            COMPLETED_SHARDS_COUNT=$(( COMPLETED_SHARDS_COUNT + 1 ))
+        fi
+    done
+    REMAINING_SHARDS=$(( 3 - COMPLETED_SHARDS_COUNT ))
+    REQUIRED_GB=$(( REMAINING_SHARDS * 200 ))
+    if [ "$COMPLETED_SHARDS_COUNT" -eq 0 ]; then
+        REQUIRED_GB=600
+    elif [ "$REQUIRED_GB" -lt 150 ]; then
+        REQUIRED_GB=150
+    fi
+
+    FREE_GB=$(df -P -BG "$SNAPCHAIN_DIR" 2>/dev/null | awk 'NR==2 {gsub(/[^0-9]/,"",$4); print $4+0}')
+    if [ "$FREE_GB" -lt "$REQUIRED_GB" ]; then
+        echo -e "\n${RED}${BOLD}================================================================${NC}"
+        echo -e "${RED}${BOLD}  [ERROR] INSUFFICIENT STORAGE SPACE (${FREE_GB} GB < ${REQUIRED_GB} GB)   ${NC}"
+        echo -e "${RED}${BOLD}================================================================${NC}"
+        echo -e "${RED}Available storage on target: ${FREE_GB} GB${NC}"
+        echo -e "${RED}Minimum required storage:    ${REQUIRED_GB} GB${NC}"
+        echo -e "${RED}A minimum of 600 GB free disk space is strictly required for fresh installation.${NC}"
+        echo -e "${RED}Setup aborted to protect host storage from exhaustion.${NC}"
+        echo -e "${RED}${BOLD}================================================================${NC}\n"
+        exit 1
+    fi
+fi
+
 # Clean up broken directory artifacts if created by Docker volume mounts
 [ -d "snapchain.sh" ] && rm -rf "snapchain.sh" 2>/dev/null || true
 [ -d "docker-compose.yml" ] && rm -rf "docker-compose.yml" 2>/dev/null || true
@@ -391,17 +499,11 @@ else
     fi
 
     if [ "$IS_RUNNING" == "true" ]; then
-        echo -e "  ${GREEN}✓ Active Background Snapshot Pipeline detected (PID: ${WORKER_PID}).${NC}"
-        echo -e "    ${CYAN}Notice: The pipeline is running in a detached background worker independent of this SSH session.${NC}"
+        echo -e "  ${GREEN}✓ Active background snapshot pipeline detected (PID: ${WORKER_PID}). Attaching to live progress monitor...${NC}"
         echo -e "    ${CYAN}Tip: Press Ctrl+C at any time to detach or stop the sync.${NC}\n"
     else
-        echo -e "  • Starting Detached RAM-Assisted Concurrent Streaming Pipeline..."
-        echo -e "    ${CYAN}Notice: Worker runs as an independent daemon immune to SSH dropouts or terminal closure.${NC}"
-        echo -e "    ${CYAN}Chunks are streamed through RAM (/dev/shm) directly into RocksDB (zero disk waste).${NC}\n"
-
         # Accelerate multi-core decompression with pigz if available
         if ! command -v pigz &>/dev/null && command -v apt-get &>/dev/null; then
-            echo -e "  • Provisioning multi-core decompression engine (pigz)..."
             apt-get update -qq && apt-get install -y -qq pigz &>/dev/null || true
         fi
 
@@ -1129,7 +1231,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
             dash_out+=$(printf "${BLUE}│${NC} %-74s ${BLUE}│${NC}\n" "SNAPCHAIN STREAMING PIPELINE - REAL-TIME OBSERVABILITY ENGINE")
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
-                "Shard ${shard_id}/${total_shards} [${bar}] ${pct}%" "ETA: ${eta_str} (${done_cnt}/${total_chunks} Chunks)")
+                "Shard ${shard_id}/2 [${bar}] ${pct}%" "ETA: ${eta_str} (${done_cnt}/${total_chunks} Chunks)")
             dash_out+="\n"
             dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
@@ -1146,9 +1248,6 @@ for SHARD_ID in "${SHARDS[@]}"; do
             dash_out+="\n"
             dash_out+=$(printf "${BLUE}│${NC} %-36s | %-35s ${BLUE}│${NC}\n" \
                 "  [SYS] CPU: ${cpu_pct}% | Storage Wait: ${iowait_pct}%" "RAM: $(format_bytes $(( mem_used_kb * 1024 )))/$(format_bytes $(( mem_tot_kb * 1024 ))) | Shm: $(format_bytes "$shm_used") (${shm_pct}%)")
-            dash_out+="\n"
-            dash_out+="${BLUE}├────────────────────────────────────────────────────────────────────────────┤${NC}\n"
-            dash_out+=$(printf "${BLUE}│${NC} %-74.74s ${BLUE}│${NC}\n" "  ➤ [${bottleneck_title}] ${bottleneck_desc}")
             dash_out+="\n"
             dash_out+="${BLUE}└────────────────────────────────────────────────────────────────────────────┘${NC}"
 
@@ -1279,7 +1378,7 @@ for SHARD_ID in "${SHARDS[@]}"; do
     rm -rf "$BUFFER_DIR" 2>/dev/null || true
 
     touch "${SNAPCHAIN_DIR}/.rocks/.shard_${SHARD_ID}.complete"
-    update_status "  ${GREEN}✓ Shard [${SHARD_ID}/${NUM_SHARDS}] materialized and verified successfully!${NC}"
+    update_status "  ${GREEN}✓ Shard [${SHARD_ID}/2] materialized and verified successfully!${NC}"
 done
 
 echo "SUCCESS" > "$DONE_FILE"
@@ -1455,32 +1554,23 @@ else
 fi
 
 echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-echo -e "${GREEN}${BOLD}  ✓ Step (1) Complete: Standalone Read Node operational!        ${NC}"
+echo -e "${GREEN}${BOLD}  ✓ Step (2/3) Complete: Snapchain Read Node is UP and RUNNING! ${NC}"
 echo -e "${GREEN}${BOLD}================================================================${NC}\n"
 
 # ------------------------------------------------------------------------------
-# 8. Interactive Prompt to Execute Step (2)
+# Direct Automatic Transition to Step (3/3)
 # ------------------------------------------------------------------------------
-AUTO_STEP2=$(prompt_user "Would you like to automatically launch Step (2) [Sovereign Client & Web UI] now? [Y/n]: " "y")
+echo -e "${CYAN}${BOLD}• Automatically proceeding to Step (3/3) [Launch Web Client & Dashboard]...${NC}\n"
 
-case "$AUTO_STEP2" in
-    [yY]|[yY][eE][sS])
-        echo -e "\n${CYAN}${BOLD}Launching Step (2): Setting up Sovereign Web Client & CLI...${NC}\n"
-        if [ -f "./scripts/2-create-client.sh" ]; then
-            exec bash "./scripts/2-create-client.sh"
-        elif [ -f "./2-create-client.sh" ]; then
-            exec bash "./2-create-client.sh"
-        elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
-            exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
-        else
-            TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
-            curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
-            chmod +x "$TMP_SCRIPT"
-            exec bash "$TMP_SCRIPT"
-        fi
-        ;;
-    *)
-        echo -e "\nNext step: Run Command (2) whenever you are ready to launch your Client & Web UI:"
-        echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash${NC}\n"
-        ;;
-esac
+if [ -f "./scripts/2-create-client.sh" ]; then
+    exec bash "./scripts/2-create-client.sh"
+elif [ -f "./2-create-client.sh" ]; then
+    exec bash "./2-create-client.sh"
+elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
+    exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
+else
+    TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
+    curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+    chmod +x "$TMP_SCRIPT"
+    exec bash "$TMP_SCRIPT"
+fi

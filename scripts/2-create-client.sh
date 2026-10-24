@@ -25,7 +25,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}${BOLD}================================================================${NC}"
-echo -e "${BLUE}${BOLD} (2) Launch Sovereign Farcaster Client Container (Dockerized)   ${NC}"
+echo -e "${BLUE}${BOLD}  [Step 3/3] Launch Sovereign Farcaster Client Container (Docker) ${NC}"
 echo -e "${BLUE}${BOLD}================================================================${NC}"
 
 CLIENT_TYPE="${1:-web}" # 'web' or 'cli'
@@ -152,20 +152,28 @@ COMMIT_MSG=$(git log -1 --pretty=%B 2>/dev/null | head -n 1 || echo "release")
 echo -e "Verified repository commit: ${GREEN}${BOLD}${COMMIT_HASH}${NC} (${COMMIT_MSG})"
 
 # ------------------------------------------------------------------------------
-# 4. Build Sovereign Client Docker Image
+# 4. Build Sovereign Client Docker Image (Silent)
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}Building Sovereign Farcaster Client Container Image (farcaster-client)...${NC}"
-echo -e "  Notice: Next.js dependencies and production build execute entirely inside Docker."
-echo -e "  Host machine remains completely clean with zero global Node.js packages.\n"
+echo -e "\n${CYAN}${BOLD}[1/3] Building Sovereign Farcaster Client Image (farcaster-client)...${NC}"
+echo -e "  Notice: Next.js dependencies and build execute entirely inside Docker container."
 
-$DOCKER_BIN build -t farcaster-client .
+BUILD_ERR=0
+if ! $DOCKER_BIN build -t farcaster-client . > /tmp/client_build.log 2>&1; then
+    BUILD_ERR=1
+fi
 
-echo -e "\n  ${GREEN}✓ Client Docker image successfully built: farcaster-client${NC}"
+if [ "$BUILD_ERR" -ne 0 ]; then
+    echo -e "  ${RED}[ERROR] Docker build failed for farcaster-client. Log output:${NC}"
+    tail -n 25 /tmp/client_build.log 2>/dev/null || true
+    exit 1
+fi
+
+echo -e "  ${GREEN}✓ Client Docker image successfully built: farcaster-client${NC}"
 
 # ------------------------------------------------------------------------------
 # 4.5 Ensure Sovereign PostgreSQL Indexer Database (512MB RAM cap, Zero-Config)
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}Ensuring Sovereign PostgreSQL Indexer Container (512MB RAM cap)...${NC}"
+echo -e "\n${CYAN}${BOLD}[2/3] Initializing Sovereign Infrastructure Containers...${NC}"
 NET_ARGS="--network host"
 PG_NET_ARGS="--network host"
 PG_HOST="127.0.0.1"
@@ -181,6 +189,7 @@ if [ "$(uname -s 2>/dev/null || echo "")" != "Linux" ]; then
     fi
 fi
 
+echo -e "  • Starting PostgreSQL Indexer (512MB RAM cap)..."
 if ! $DOCKER_BIN ps --format '{{.Names}}' 2>/dev/null | grep -q '^farcaster-postgres$'; then
     $DOCKER_BIN rm -f farcaster-postgres > /dev/null 2>&1 || true
     $DOCKER_BIN run -d \
@@ -194,15 +203,14 @@ if ! $DOCKER_BIN ps --format '{{.Names}}' 2>/dev/null | grep -q '^farcaster-post
         -e POSTGRES_PASSWORD=farcaster_secret \
         $PG_NET_ARGS \
         postgres:16-alpine > /dev/null 2>&1 || true
-    echo -e "  Waiting for PostgreSQL database container initialization..."
     sleep 3
 fi
-echo -e "  ${GREEN}✓ PostgreSQL Indexer is running (512MB cap, Zero-Config)${NC}"
+echo -e "    ${GREEN}✓ farcaster-postgres active.${NC}"
 
 # ------------------------------------------------------------------------------
 # 4.6 Launch Sovereign Feed Indexer Worker (25,000-cast FIFO eviction, Live Events)
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}${BOLD}Launching Sovereign Feed Indexer Worker Container (farcaster-feed-worker)...${NC}"
+echo -e "  • Starting Feed Indexer Worker (Live Event Stream, 25K FIFO)..."
 $DOCKER_BIN rm -f farcaster-feed-worker > /dev/null 2>&1 || true
 $DOCKER_BIN run -d \
     --name farcaster-feed-worker \
@@ -212,7 +220,7 @@ $DOCKER_BIN run -d \
     -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
     -e MAX_FEED_CASTS="25000" \
     farcaster-client npm run worker > /dev/null 2>&1 || true
-echo -e "  ${GREEN}✓ Feed Indexer Worker is running (Live Event Stream, max 25,000 casts FIFO)${NC}"
+echo -e "    ${GREEN}✓ farcaster-feed-worker active.${NC}"
 
 # ------------------------------------------------------------------------------
 # 5. Launch Client (Interactive CLI or Background Web UI Container)
@@ -225,7 +233,7 @@ if [ "$CLIENT_TYPE" == "cli" ]; then
         -e DATABASE_URL="postgresql://farcaster:farcaster_secret@${PG_HOST}:5432/snapchain_client" \
         farcaster-client npm run cli
 else
-    echo -e "\n${CYAN}${BOLD}Starting Sovereign Farcaster Web Client container (port 3000)...${NC}"
+    echo -e "  • Starting Web Client Container on port 3000..."
 
     $DOCKER_BIN run -d \
         --name farcaster-client \
@@ -241,7 +249,6 @@ else
     PUBLIC_IP=$(curl -s -m 2 https://api.ipify.org 2>/dev/null || curl -s -m 2 ifconfig.me 2>/dev/null || echo "127.0.0.1")
 
     # Health check for web client readiness
-    echo -e "  Waiting for Web Client container to become ready on http://localhost:3000..."
     WAIT_SEC=0
     CLIENT_READY=false
     while [ "$WAIT_SEC" -lt 30 ]; do
@@ -251,14 +258,13 @@ else
         fi
         sleep 2
         WAIT_SEC=$(( WAIT_SEC + 2 ))
-        printf "."
     done
-    echo ""
+    echo -e "    ${GREEN}✓ farcaster-client active (http://localhost:3000).${NC}"
 
     # ------------------------------------------------------------------------------
     # 5.5 Provision Zero-Config Cloudflare Quick Tunnel (HTTPS / SSL Subdomain)
     # ------------------------------------------------------------------------------
-    echo -e "\n${CYAN}${BOLD}Provisioning Cloudflare Quick Tunnel (trycloudflare.com with SSL)...${NC}"
+    echo -e "\n${CYAN}${BOLD}[3/3] Establishing Cloudflare HTTPS Quick Tunnel...${NC}"
     $DOCKER_BIN rm -f farcaster-tunnel > /dev/null 2>&1 || true
 
     TUNNEL_TARGET="http://127.0.0.1:3000"
