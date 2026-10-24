@@ -35,6 +35,7 @@ import {
   Filter,
   Plus,
   Image as ImageIcon,
+  BookOpen,
 } from 'lucide-react';
 import { FarcasterCast, FarcasterUser, UserSession, isRootCast } from '@/lib/farcaster/types';
 import { LoginPage } from './LoginPage';
@@ -1267,6 +1268,15 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            <a
+              href="/"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-all"
+              title="Return to Quickstart & Tutorial Microsite"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Quickstart & Tutorial</span>
+              <span className="sm:hidden">Guide</span>
+            </a>
             {/* Mobile Search Toggle */}
             <button
               onClick={() => setIsMobileSearchOpen((prev) => !prev)}
@@ -1517,6 +1527,14 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
                     <span>My Profile</span>
                   </button>
                 )}
+
+                <a
+                  href="/"
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 transition-all border border-transparent hover:border-purple-200"
+                >
+                  <BookOpen className="h-5 w-5 text-purple-600" />
+                  <span>Quickstart & Tutorial</span>
+                </a>
               </nav>
 
               <hr className="border-slate-100 my-2" />

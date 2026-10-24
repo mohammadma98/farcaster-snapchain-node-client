@@ -13,6 +13,8 @@ node_modules
 # Production build artifacts
 build
 dist
+dist-microsite/
+scratch/
 *.tsbuildinfo
 
 # Temporary CLI sessions & keys

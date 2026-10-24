@@ -1,6 +1,26 @@
 import { decodeAbiParameters, bytesToHex, type Hex } from 'viem';
-import { getDatabasePool, isPostgresAvailable } from '../db/pool';
 import { ClientAttributionDetails, ClientCategory, KnownClientEntry } from './types';
+
+function getDbModule() {
+  if (typeof window !== 'undefined') return null;
+  try {
+    // Dynamic node require prevents webpack from bundling pg into client bundles
+    const req = eval('require');
+    return req('../db/pool');
+  } catch {
+    return null;
+  }
+}
+
+async function getPoolSafe() {
+  const db = getDbModule();
+  return db ? db.getDatabasePool() : null;
+}
+
+async function isPostgresAvailableSafe(): Promise<boolean> {
+  const db = getDbModule();
+  return db ? db.isPostgresAvailable() : false;
+}
 
 /**
  * Standard ABI tuple for EIP-712 SignedKeyRequest metadata
@@ -86,24 +106,26 @@ export class SignerAttributionService {
     }
 
     // 2. Check L2 PostgreSQL Cache
-    const isDb = await isPostgresAvailable();
+    const isDb = await isPostgresAvailableSafe();
     if (isDb) {
       try {
-        const pool = getDatabasePool();
-        const res = await pool.query('SELECT * FROM signers WHERE key = $1', [signerKey]);
-        if (res.rows.length > 0) {
-          const row = res.rows[0];
-          const details: ClientAttributionDetails = {
-            signer: row.key,
-            userFid: row.fid,
-            clientFid: row.request_fid,
-            clientType: row.client_type as ClientCategory,
-            clientName: row.client_name,
-            clientUsername: row.client_username || undefined,
-            badgeColor: KNOWN_CLIENTS[row.request_fid]?.brandColor || '#64748B',
-          };
-          this.setL1Cache(signerKey, details);
-          return details;
+        const pool = await getPoolSafe();
+        if (pool) {
+          const res = await pool.query('SELECT * FROM signers WHERE key = $1', [signerKey]);
+          if (res.rows.length > 0) {
+            const row = res.rows[0];
+            const details: ClientAttributionDetails = {
+              signer: row.key,
+              userFid: row.fid,
+              clientFid: row.request_fid,
+              clientType: row.client_type as ClientCategory,
+              clientName: row.client_name,
+              clientUsername: row.client_username || undefined,
+              badgeColor: KNOWN_CLIENTS[row.request_fid]?.brandColor || '#64748B',
+            };
+            this.setL1Cache(signerKey, details);
+            return details;
+          }
         }
       } catch (err: any) {
         console.warn('[Attribution] L2 cache lookup error:', err.message);
@@ -151,7 +173,7 @@ export class SignerAttributionService {
     }
 
     // Check L2 DB for missing keys
-    const isDb = await isPostgresAvailable();
+    const isDb = await isPostgresAvailableSafe();
     const remainingMissingKeys = new Map<number, Set<string>>();
 
     if (isDb && missingFidKeys.size > 0) {
@@ -161,13 +183,14 @@ export class SignerAttributionService {
       }
 
       try {
-        const pool = getDatabasePool();
-        const res = await pool.query(
-          'SELECT * FROM signers WHERE key = ANY($1::varchar[])',
-          [allKeys]
-        );
-        const foundKeys = new Set<string>();
-        for (const row of res.rows) {
+        const pool = await getPoolSafe();
+        if (pool) {
+          const res = await pool.query(
+            'SELECT * FROM signers WHERE key = ANY($1::varchar[])',
+            [allKeys]
+          );
+          const foundKeys = new Set<string>();
+          for (const row of res.rows) {
           const details: ClientAttributionDetails = {
             signer: row.key,
             userFid: row.fid,
@@ -192,7 +215,8 @@ export class SignerAttributionService {
             remainingMissingKeys.set(fid, stillMissing);
           }
         }
-      } catch (err: any) {
+      }
+    } catch (err: any) {
         console.warn('[Attribution] Batch L2 lookup error:', err.message);
       }
     } else {
@@ -353,7 +377,8 @@ export class SignerAttributionService {
    */
   private static async persistSignerToDb(details: ClientAttributionDetails): Promise<void> {
     try {
-      const pool = getDatabasePool();
+      const pool = await getPoolSafe();
+      if (!pool) return;
       await pool.query(
         `
         INSERT INTO signers (

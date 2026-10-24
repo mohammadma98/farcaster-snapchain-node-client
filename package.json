@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
+    "build:microsite": "node scripts/build-microsite.js",
     "start": "next start -H 0.0.0.0 -p 3000",
     "worker": "tsx src/worker/index.ts",
     "cli": "tsx src/cli/index.ts",
