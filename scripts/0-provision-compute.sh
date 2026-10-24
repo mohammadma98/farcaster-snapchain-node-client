@@ -139,18 +139,18 @@ if [ "$HTTP_ACTIVE" == "true" ] || [ "$CONTAINER_ACTIVE" == "true" ] || [ "$ALL_
     echo -e "  • HTTP API:        $( [ "$HTTP_ACTIVE" == "true" ] && echo -e "${GREEN}http://localhost:3381 (HTTP 200 OK)${NC}" || echo -e "${YELLOW}Starting up${NC}" )"
     echo -e "  • Database Size:   ${BOLD}${DB_SIZE}${NC} on disk (${CHECK_SNAPCHAIN_DIR}/.rocks)"
     echo -e "  • Target Data Dir: ${BOLD}${CHECK_SNAPCHAIN_DIR}${NC}\n"
-    echo -e "  Notice: Server compute and read node are already operational."
-    echo -e "${CYAN}${BOLD}• Proceeding directly to Step (3/3) to launch or update Client & Web UI...${NC}\n"
+    echo -e "  Notice: Compute environment verified. Handing over to Read Node management."
+    echo -e "${CYAN}${BOLD}• Proceeding to Step (2/3) [Setup & Verify Read Node]...${NC}\n"
 
-    if [ -f "./scripts/2-create-client.sh" ]; then
-        exec bash "./scripts/2-create-client.sh"
-    elif [ -f "./2-create-client.sh" ]; then
-        exec bash "./2-create-client.sh"
-    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh" ]; then
-        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/2-create-client.sh"
+    if [ -f "./scripts/1-setup-read-node.sh" ]; then
+        exec bash "./scripts/1-setup-read-node.sh"
+    elif [ -f "./1-setup-read-node.sh" ]; then
+        exec bash "./1-setup-read-node.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
     else
-        TMP_SCRIPT=$(mktemp /tmp/snapchain_step2.XXXXXX.sh)
-        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+        TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
         chmod +x "$TMP_SCRIPT"
         exec bash "$TMP_SCRIPT"
     fi
