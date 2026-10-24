@@ -39,14 +39,13 @@
     }
   </script>
   <style>
-    /* Clean Minimalist Styling */
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background-color: #f8fafc;
+      background-color: #fafafa;
       color: #0f172a;
     }
     code, pre {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
     ::selection {
       background-color: #e9d5ff;
@@ -55,79 +54,67 @@
     .card-clean {
       background-color: #ffffff;
       border: 1px solid #e2e8f0;
-      border-radius: 1rem;
-      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+      border-radius: 0.875rem;
     }
   </style>
 </head>
 <body class="min-h-screen text-slate-800 antialiased flex flex-col justify-between">
 
-  <!-- TOP HEADER -->
-  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-      <!-- Wordmark -->
-      <a href="#" class="flex items-center gap-2.5 group">
-        <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-700 text-white font-bold text-sm shadow-xs group-hover:bg-purple-800 transition-colors">
-          FC
-        </span>
-        <span class="font-bold text-slate-900 tracking-tight text-base">Farcaster Snapchain</span>
-        <span class="hidden sm:inline-block px-2 py-0.5 text-[11px] font-mono font-medium rounded-md bg-purple-50 text-purple-700 border border-purple-200">
-          MIT
-        </span>
+  <!-- MINIMALIST UNCLUTTERED HEADER -->
+  <header class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <!-- Brand -->
+      <a href="#" class="flex items-center gap-2 text-slate-900 font-semibold text-sm tracking-tight hover:opacity-80 transition-opacity">
+        <span class="flex h-6 w-6 items-center justify-center rounded-md bg-purple-700 text-white font-bold text-xs">FC</span>
+        <span>Farcaster Snapchain</span>
       </a>
 
-      <!-- Navigation Anchors -->
-      <nav class="hidden md:flex items-center gap-6 text-xs font-semibold text-slate-600">
-        <a href="#quickstart" class="hover:text-purple-700 transition-colors" id="nav-qs">1-Command Quickstart</a>
-        <a href="#stages" class="hover:text-purple-700 transition-colors" id="nav-stages">3 Stages</a>
-        <a href="#features" class="hover:text-purple-700 transition-colors" id="nav-features">Features</a>
-        <a href="#benchmarks" class="hover:text-purple-700 transition-colors" id="nav-benchmarks">Benchmarks</a>
-        <a href="#architecture" class="hover:text-purple-700 transition-colors" id="nav-arch">Architecture</a>
-        <a href="#api" class="hover:text-purple-700 transition-colors" id="nav-api">REST API</a>
-        <a href="#voucher" class="hover:text-purple-700 transition-colors" id="nav-voucher">Voucher</a>
-      </nav>
+      <!-- Minimal Header Navigation -->
+      <div class="flex items-center gap-4 text-xs font-medium text-slate-600">
+        <a href="#quickstart" class="hover:text-slate-900 transition-colors" id="nav-qs">Quickstart</a>
+        <a href="#architecture" class="hover:text-slate-900 transition-colors" id="nav-arch">Architecture</a>
+        <a href="#api" class="hover:text-slate-900 transition-colors" id="nav-api">API</a>
 
-      <!-- Language & GitHub -->
-      <div class="flex items-center gap-3">
         <!-- Language Switcher -->
-        <div class="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs font-bold border border-slate-200">
-          <button onclick="setLang('en')" id="btn-lang-en" class="px-2.5 py-1 rounded-md bg-white text-purple-700 shadow-xs transition-all">EN</button>
-          <button onclick="setLang('zh')" id="btn-lang-zh" class="px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-900 transition-all">中文</button>
+        <div class="flex items-center rounded-md bg-slate-100 p-0.5 text-xs font-semibold">
+          <button onclick="setLang('en')" id="btn-lang-en" class="px-2 py-0.5 rounded bg-white text-purple-700 shadow-xs transition-all">EN</button>
+          <button onclick="setLang('zh')" id="btn-lang-zh" class="px-2 py-0.5 text-slate-500 hover:text-slate-900 transition-all">中文</button>
         </div>
 
-        <a href="https://github.com/mohammadma98/farcaster-snapchain-node-client" target="_blank" rel="noopener noreferrer" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-all">
-          <svg class="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          <span class="hidden sm:inline">GitHub</span>
+        <!-- GitHub -->
+        <a href="https://github.com/mohammadma98/farcaster-snapchain-node-client" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors flex items-center gap-1 font-semibold text-slate-900">
+          <span>GitHub</span>
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
         </a>
       </div>
     </div>
   </header>
 
-  <!-- MAIN CONTAINER -->
-  <main class="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-16 flex-grow">
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="max-w-4xl mx-auto px-4 sm:px-6 py-10 space-y-14 flex-grow w-full">
 
     <!-- HERO SECTION -->
-    <section class="space-y-4 pt-4">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 border border-purple-200 text-xs text-purple-700 font-semibold font-mono" id="hero-badge">
-        <span>🟣</span> Open Source · MIT · Zero Third-Party API Keys
-      </div>
+    <section class="space-y-3 pt-2">
+      <p class="text-xs font-semibold text-slate-500 font-mono tracking-wide" id="hero-badge">
+        Open Source · MIT License · Zero Third-Party API Keys
+      </p>
 
-      <h1 class="text-3xl sm:text-5xl font-black text-slate-950 tracking-tight leading-tight" id="hero-title">
-        Farcaster Snapchain Read Node & Sovereign Web Client<span class="text-purple-700">.</span>
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-tight" id="hero-title">
+        Read and post on Farcaster from your own server<span class="text-purple-700">.</span>
       </h1>
 
-      <p class="text-base sm:text-lg text-slate-600 leading-relaxed" id="hero-desc">
-        A production-grade, sovereign Farcaster node and web client suite requiring zero third-party API keys. Engineered for developers, decentralization advocates, and censorship-resistant communities seeking total protocol sovereignty.
+      <p class="text-sm sm:text-base text-slate-600 leading-relaxed max-w-3xl" id="hero-desc">
+        A production-grade, sovereign Farcaster node and web client suite requiring zero third-party API keys. Run your own independent infrastructure in one command.
       </p>
     </section>
 
     <!-- SECTION 1: JUST ONE COMMAND! (START OF PAGE - USER REQUIREMENT) -->
-    <section id="quickstart" class="card-clean p-6 sm:p-8 space-y-5 border-l-4 border-l-purple-700">
+    <section id="quickstart" class="card-clean p-6 sm:p-7 space-y-4 border-l-4 border-l-purple-700 shadow-xs">
       <div>
-        <div class="flex items-center gap-2 text-purple-700 font-bold text-xs uppercase tracking-wider mb-1" id="qs-badge">
-          <span>⚡</span> Single-Command Autonomous Quickstart
-        </div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="qs-title">
+        <span class="text-purple-700 font-bold text-xs font-mono uppercase tracking-wider block mb-1" id="qs-badge">
+          Single-Command Autonomous Setup
+        </span>
+        <h2 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight" id="qs-title">
           Just ONE Command!
         </h2>
         <p class="text-xs sm:text-sm text-slate-600 mt-1" id="qs-sub">
@@ -136,206 +123,198 @@
       </div>
 
       <!-- Clean Terminal Box -->
-      <div class="relative bg-slate-950 rounded-xl p-4 sm:p-5 text-slate-100 font-mono text-xs sm:text-sm shadow-md overflow-x-auto">
-        <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800 text-xs text-slate-400">
+      <div class="relative bg-slate-950 rounded-xl p-4 text-slate-100 font-mono text-xs sm:text-sm shadow-md overflow-x-auto">
+        <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-800 text-xs text-slate-400">
           <span class="flex items-center gap-1.5">
-            <span class="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-            <span class="h-2.5 w-2.5 rounded-full bg-amber-500"></span>
-            <span class="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-            <span class="ml-2 text-slate-500">bash terminal</span>
+            <span class="h-2 w-2 rounded-full bg-red-500"></span>
+            <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+            <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+            <span class="ml-2 text-slate-500 font-sans">bash</span>
           </span>
-          <button onclick="copyOneCommand(this)" class="px-3 py-1 rounded-md bg-purple-700 hover:bg-purple-600 text-white font-sans text-xs font-semibold transition-colors">
-            Copy Command
+          <button onclick="copyOneCommand(this)" class="px-3 py-1 rounded bg-purple-700 hover:bg-purple-600 text-white font-sans text-xs font-semibold transition-colors">
+            Copy
           </button>
         </div>
-        <code class="text-purple-300 font-bold select-all block break-all">
+        <code class="text-purple-300 font-semibold select-all block break-all">
 curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash
         </code>
       </div>
 
       <p class="text-xs text-slate-500 leading-relaxed" id="qs-note">
-        <strong>How it works:</strong> Once executed, the automated pipeline performs all work sequentially across <strong>3 integrated stages</strong>: Server Configuration (0) → Snapchain High-Speed Ingestion (1) → Web Client, Indexer & Cloudflare SSL Tunnel (2).
+        <strong>How it works:</strong> The pipeline executes all 3 stages sequentially: Server Tuning (0) → Snapchain RocksDB Streaming (1) → Web Client & Cloudflare SSL Tunnel (2).
       </p>
     </section>
 
-    <!-- SECTION 2: THE 3 MODULAR STAGES (README BREAKDOWN) -->
-    <section id="stages" class="space-y-6">
+    <!-- SECTION 2: THE 3 SEQUENTIAL STAGES -->
+    <section id="stages" class="space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="stages-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="stages-title">
           The 3 Sequential Stages
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="stages-sub">
-          While the single command above runs the entire pipeline end-to-end autonomously, you can also execute each modular script independently whenever needed:
+        <p class="text-xs text-slate-500 mt-0.5" id="stages-sub">
+          While the single command above runs the entire pipeline end-to-end autonomously, you can also execute each modular script independently:
         </p>
       </div>
 
-      <div class="space-y-4">
+      <div class="space-y-3">
         <!-- Stage 1 -->
-        <div class="card-clean p-5 space-y-3">
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-1">
-              <span class="inline-block px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-purple-100 text-purple-800">Stage 1</span>
+        <div class="card-clean p-4 sm:p-5 space-y-2.5">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded bg-purple-100 text-purple-800">Stage 1</span>
               <h3 class="text-sm font-bold text-slate-900" id="s1-title">Server Configuration & Kernel Tuning (<code>0-provision-compute.sh</code>)</h3>
-              <p class="text-xs text-slate-600" id="s1-desc">
-                Installs prerequisite packages (Docker Engine, Compose plugin, UFW firewall, zstd, jq). Configures firewall ports: <code>22</code> SSH, <code>3000</code> Web UI, <code>3381</code> HTTP API, <code>3382</code> Libp2p Gossip, <code>3383</code> gRPC, <code>3005</code> Grafana. Dynamically tunes Linux kernel network buffers for sustained P2P throughput.
-              </p>
             </div>
+            <p class="text-xs text-slate-600 mt-1" id="s1-desc">
+              Installs prerequisite packages (Docker, Compose plugin, UFW firewall, zstd, jq). Configures ports: 22, 3000, 3381 (HTTP), 3382 (Gossip), 3383 (gRPC), 3005. Dynamically tunes Linux kernel network buffers for sustained P2P throughput.
+            </p>
           </div>
-          <div class="bg-slate-100 rounded-lg p-2.5 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
+          <div class="bg-slate-100 rounded-lg p-2 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
             <code class="break-all select-all">curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash</code>
-            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash')" class="px-2.5 py-1 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
+            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
           </div>
         </div>
 
         <!-- Stage 2 -->
-        <div class="card-clean p-5 space-y-3">
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-1">
-              <span class="inline-block px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-cyan-100 text-cyan-800">Stage 2</span>
-              <h3 class="text-sm font-bold text-slate-900" id="s2-title">Read Node Installation & High-Speed Streaming (<code>1-setup-read-node.sh</code>)</h3>
-              <p class="text-xs text-slate-600" id="s2-desc">
-                Streams and downloads the large Snapchain database snapshot at maximum throughput using a concurrent chunk pipeline. Extracts on-the-fly directly to the RocksDB storage layer, eliminating duplicate multi-hundred-gigabyte archive files. Boots the Snapchain container and monitors <code>http://127.0.0.1:3381/v1/info</code> until synced.
-              </p>
+        <div class="card-clean p-4 sm:p-5 space-y-2.5">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded bg-cyan-100 text-cyan-800">Stage 2</span>
+              <h3 class="text-sm font-bold text-slate-900" id="s2-title">Read Node Installation & Concurrent Streaming (<code>1-setup-read-node.sh</code>)</h3>
             </div>
+            <p class="text-xs text-slate-600 mt-1" id="s2-desc">
+              Streams and downloads the Snapchain database snapshot at maximum throughput using a concurrent chunk pipeline. Extracts on-the-fly directly to RocksDB, eliminating duplicate multi-hundred-gigabyte archive files. Monitors :3381/v1/info until synced.
+            </p>
           </div>
-          <div class="bg-slate-100 rounded-lg p-2.5 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
+          <div class="bg-slate-100 rounded-lg p-2 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
             <code class="break-all select-all">curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash</code>
-            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash')" class="px-2.5 py-1 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
+            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh | bash')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
           </div>
         </div>
 
         <!-- Stage 3 -->
-        <div class="card-clean p-5 space-y-3">
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-1">
-              <span class="inline-block px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-emerald-100 text-emerald-800">Stage 3</span>
+        <div class="card-clean p-4 sm:p-5 space-y-2.5">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded bg-emerald-100 text-emerald-800">Stage 3</span>
               <h3 class="text-sm font-bold text-slate-900" id="s3-title">Web Client, Data Indexer & Cloudflare SSL Tunnel (<code>2-create-client.sh</code>)</h3>
-              <p class="text-xs text-slate-600" id="s3-desc">
-                Builds and launches the Next.js web client and fast-indexing layer in isolated Docker containers. Automatically configures a zero-config Cloudflare Edge Tunnel (<code>https://*.trycloudflare.com</code>) with valid SSL certificates for immediate browser and mobile access.
-              </p>
             </div>
+            <p class="text-xs text-slate-600 mt-1" id="s3-desc">
+              Builds and launches the Next.js web client and fast-indexing layer in isolated Docker containers. Automatically configures a zero-config Cloudflare Edge Tunnel (https://*.trycloudflare.com) with valid SSL certificates for immediate browser access.
+            </p>
           </div>
-          <div class="bg-slate-100 rounded-lg p-2.5 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
+          <div class="bg-slate-100 rounded-lg p-2 font-mono text-[11px] text-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
             <code class="break-all select-all">curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash</code>
-            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash')" class="px-2.5 py-1 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
+            <button onclick="copySnippet(this, 'curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/2-create-client.sh | bash')" class="px-2 py-0.5 rounded bg-white hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold shrink-0">Copy</button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 3: KEY FEATURES & CAPABILITIES -->
-    <section id="features" class="space-y-6">
+    <!-- SECTION 3: KEY FEATURES -->
+    <section id="features" class="space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="feat-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="feat-title">
           Key Features & Capabilities
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="feat-sub">
-          Engineered for maximum reliability, minimal resource footprint, and zero operational dependencies.
+        <p class="text-xs text-slate-500 mt-0.5" id="feat-sub">
+          Engineered for minimal resource footprint, maximum reliability, and zero third-party dependencies.
         </p>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed">
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f1-title">💾 Minimal Storage (600 GB - 750 GB)</span>
-          <p class="text-slate-600" id="f1-desc">Fully operational on drives as low as 600 GB to 750 GB. The memory-assisted streaming pipeline directly populates RocksDB partitions on-the-fly, reducing peak storage requirements from 1.4 TB+ down to ~500–600 GB.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs leading-relaxed">
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f1-title">💾 Minimal Storage (600 GB - 750 GB)</span>
+          <p class="text-slate-600" id="f1-desc">Runs smoothly on drives as low as 600 GB to 750 GB. Memory-assisted streaming extracts directly to RocksDB partitions, reducing peak disk from 1.4 TB+ to ~500–600 GB.</p>
         </div>
-
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f2-title">⚙️ Ultra-Optimized Low-Spec Hardware</span>
-          <p class="text-slate-600" id="f2-desc">Engineered with adaptive hardware matrix detection, running smoothly on constrained cloud servers with as little as <strong>1 vCPU core and 3 GB RAM</strong>.</p>
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f2-title">⚙️ 1 vCPU & 3 GB RAM Compatible</span>
+          <p class="text-slate-600" id="f2-desc">Adaptive hardware detection enables reliable execution even on low-cost servers with as little as 1 vCPU core and 3 GB RAM.</p>
         </div>
-
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f3-title">⚡ Blazing Fast Snapshot & Boot Time</span>
-          <p class="text-slate-600" id="f3-desc">Complete snapshot ingestion and node readiness in <strong>under 3 hours on low-end servers</strong> and <strong>under 1 hour on mid/high-end servers</strong> via multi-chunk concurrent streaming.</p>
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f3-title">⚡ Fast Snapshot Sync</span>
+          <p class="text-slate-600" id="f3-desc">Full snapshot ingestion in under 3 hours on low-end servers and under 1 hour on mid/high-end servers through concurrent streaming.</p>
         </div>
-
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f4-title">🔒 Instant Automated SSL Domain</span>
-          <p class="text-slate-600" id="f4-desc">Generates a live Cloudflare Tunnel with valid HTTPS certificates completely automatically, requiring zero API tokens, zero manual DNS records, and zero router port forwarding.</p>
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f4-title">🔒 Automatic HTTPS Tunnel</span>
+          <p class="text-slate-600" id="f4-desc">Deploys a secure Cloudflare Edge Tunnel with valid SSL certificates automatically, requiring zero manual DNS records or port forwarding.</p>
         </div>
-
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f5-title">🔑 Full Protocol Parity & Gasless Keys</span>
-          <p class="text-slate-600" id="f5-desc">Publish casts with media embeds, inspect live custody wallet balances, browse chronological feeds, perform likes/recasts/follows, and issue gasless EIP-712 app signers (Engine V16) without OP ETH.</p>
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f5-title">🔑 Gasless App Signers (Engine V16)</span>
+          <p class="text-slate-600" id="f5-desc">Authorize app signers off-chain via EIP-712 custody signatures without spending Optimism ETH or submitting on-chain transactions.</p>
         </div>
-
-        <div class="card-clean p-5 space-y-2">
-          <span class="font-bold text-slate-900 text-sm block" id="f6-title">📱 100% Responsive & Community Filtering</span>
-          <p class="text-slate-600" id="f6-desc">Filter out or isolate casts by client origin (e.g. exclude Warpcast marketing). Designed for seamless, responsive navigation across smartphones, tablets, and desktop workstations.</p>
+        <div class="card-clean p-4 space-y-1">
+          <span class="font-bold text-slate-900 block" id="f6-title">📱 Client Neutrality & Source Filtering</span>
+          <p class="text-slate-600" id="f6-desc">Filter out or isolate casts by client origin (e.g. exclude Warpcast marketing). Responsive on mobile and desktop.</p>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 4: TESTED SERVER BENCHMARKS & HOSTING PROVIDERS -->
-    <section id="benchmarks" class="space-y-6">
+    <!-- SECTION 4: SERVER BENCHMARKS -->
+    <section id="benchmarks" class="space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="bm-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="bm-title">
           Tested Server Benchmarks & Hosting Providers
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="bm-sub">
-          This suite has been rigorously tested and benchmarked across diverse real-world hardware profiles:
+        <p class="text-xs text-slate-500 mt-0.5" id="bm-sub">
+          Benchmarked across real-world hardware profiles:
         </p>
       </div>
 
       <div class="overflow-x-auto card-clean">
         <table class="w-full text-left text-xs">
-          <thead class="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold font-mono uppercase text-[11px]">
+          <thead class="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold font-mono uppercase text-[10px]">
             <tr>
-              <th class="p-4" id="th-profile">Server Profile</th>
-              <th class="p-4" id="th-hw">Hardware Specs</th>
-              <th class="p-4" id="th-cost">Monthly Cost</th>
-              <th class="p-4" id="th-sync">Sync & Launch Time</th>
-              <th class="p-4" id="th-status">Status</th>
+              <th class="p-3">Server Profile</th>
+              <th class="p-3">Hardware Specs</th>
+              <th class="p-3">Monthly Cost</th>
+              <th class="p-3">Sync & Boot</th>
+              <th class="p-3">Status</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 font-mono text-slate-700">
-            <tr class="hover:bg-slate-50/50">
-              <td class="p-4 font-bold text-slate-900 font-sans">Low-End Entry Tier</td>
-              <td class="p-4">1 vCPU, 3 GB RAM, 750 GB HDD</td>
-              <td class="p-4 font-bold text-emerald-700">~$6 / month</td>
-              <td class="p-4">~3 hours</td>
-              <td class="p-4 text-emerald-700 font-bold">✅ Verified</td>
+            <tr>
+              <td class="p-3 font-bold text-slate-900 font-sans">Low-End Entry Tier</td>
+              <td class="p-3">1 vCPU, 3 GB RAM, 750 GB HDD</td>
+              <td class="p-3 font-bold text-emerald-700">~$6 / month</td>
+              <td class="p-3">~3 hours</td>
+              <td class="p-3 text-emerald-700 font-semibold">✅ Verified</td>
             </tr>
-            <tr class="hover:bg-slate-50/50">
-              <td class="p-4 font-bold text-slate-900 font-sans">Balanced Mid Tier</td>
-              <td class="p-4">2 vCPU, 4 GB RAM, 600 GB SSD</td>
-              <td class="p-4 font-bold text-emerald-700">~$15 / month</td>
-              <td class="p-4">~3 hours</td>
-              <td class="p-4 text-emerald-700 font-bold">✅ Verified</td>
+            <tr>
+              <td class="p-3 font-bold text-slate-900 font-sans">Balanced Mid Tier</td>
+              <td class="p-3">2 vCPU, 4 GB RAM, 600 GB SSD</td>
+              <td class="p-3 font-bold text-emerald-700">~$15 / month</td>
+              <td class="p-3">~3 hours</td>
+              <td class="p-3 text-emerald-700 font-semibold">✅ Verified</td>
             </tr>
-            <tr class="hover:bg-slate-50/50">
-              <td class="p-4 font-bold text-slate-900 font-sans">High-Performance Tier</td>
-              <td class="p-4">4 vCPU, 12 GB RAM, 600 GB SSD/NVMe</td>
-              <td class="p-4 font-bold text-emerald-700">~$60 / month</td>
-              <td class="p-4">~1 - 2 hours</td>
-              <td class="p-4 text-emerald-700 font-bold">✅ Verified</td>
+            <tr>
+              <td class="p-3 font-bold text-slate-900 font-sans">High-Performance Tier</td>
+              <td class="p-3">4 vCPU, 12 GB RAM, 600 GB NVMe</td>
+              <td class="p-3 font-bold text-emerald-700">~$60 / month</td>
+              <td class="p-3">~1 - 2 hours</td>
+              <td class="p-3 text-emerald-700 font-semibold">✅ Verified</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div class="card-clean p-5 space-y-2 text-xs">
-        <h4 class="font-bold text-slate-900" id="vps-title">Recommended VPS Providers</h4>
-        <p class="text-slate-600 leading-relaxed" id="vps-desc">
-          You can provision an Ubuntu 22.04+ VPS on any provider of your choice. Real-world verification tests were successfully performed on <strong>Hetzner</strong> (cost-effective storage servers), <strong>InterServer</strong>, and <strong>Cloudzy</strong>. Also fully compatible with <strong>AWS EC2</strong> (<code>m5.xlarge</code> or custom EBS), DigitalOcean, Vultr, and OVH.
-        </p>
-      </div>
+      <p class="text-xs text-slate-500 leading-relaxed" id="vps-note">
+        Tested on <strong>Hetzner</strong>, <strong>InterServer</strong>, and <strong>Cloudzy</strong>. Also compatible with AWS EC2 (m5.xlarge), DigitalOcean, Vultr, and OVH.
+      </p>
     </section>
 
-    <!-- SECTION 5: SYSTEM ARCHITECTURE & PROTOCOL MECHANICS -->
-    <section id="architecture" class="space-y-6">
+    <!-- SECTION 5: SYSTEM ARCHITECTURE -->
+    <section id="architecture" class="space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="arch-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="arch-title">
           System Architecture & Protocol Mechanics
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="arch-sub">
-          How data flows from your sovereign client through your standalone read node and into the decentralized validator network.
+        <p class="text-xs text-slate-500 mt-0.5" id="arch-sub">
+          Direct mempool writes, gasless signing, and CometBFT consensus flow:
         </p>
       </div>
 
-      <!-- ASCII Architecture Diagram -->
-      <div class="bg-slate-950 text-purple-200 rounded-xl p-5 font-mono text-xs shadow-inner overflow-x-auto leading-tight">
+      <!-- Clean ASCII Diagram -->
+      <div class="bg-slate-950 text-purple-200 rounded-xl p-4 font-mono text-xs shadow-inner overflow-x-auto leading-tight">
 <pre class="select-all">
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                       Sovereign Farcaster Client                            │
@@ -358,219 +337,178 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 </pre>
       </div>
 
-      <!-- Protocol Deep-Dive Points -->
-      <div class="space-y-4 text-xs leading-relaxed">
-        <div class="card-clean p-5 space-y-2">
-          <h3 class="font-bold text-slate-900 text-sm" id="pt1-title">1. Why Read Nodes Accept Writes</h3>
+      <div class="space-y-3 text-xs leading-relaxed">
+        <div class="card-clean p-4 space-y-1">
+          <h3 class="font-bold text-slate-900" id="pt1-title">1. Why Read Nodes Accept Writes</h3>
           <p class="text-slate-600" id="pt1-desc">
-            In Farcaster Snapchain, read nodes are full participants in the peer-to-peer gossip mesh. When a client submits a message to <code>POST /v1/submitMessage</code>: the read node verifies the Ed25519 signature and FID permissions locally, admits the message into its local <strong>mempool</strong>, and broadcasts it across libp2p (:3382) to validator nodes for inclusion in the next block.
+            In Snapchain, read nodes accept writes via <code>POST /v1/submitMessage</code>. The node verifies the Ed25519 signature locally, places the message in its local <strong>mempool</strong>, and gossips it over libp2p (:3382) to validator nodes for block inclusion.
           </p>
         </div>
 
-        <div class="card-clean p-5 space-y-2">
-          <h3 class="font-bold text-slate-900 text-sm" id="pt2-title">2. Gasless App Key Cryptography (Engine V16)</h3>
+        <div class="card-clean p-4 space-y-1">
+          <h3 class="font-bold text-slate-900" id="pt2-title">2. Gasless App Key Cryptography (Engine V16)</h3>
           <p class="text-slate-600" id="pt2-desc">
-            App keys (signers) are authorized without blockchain transactions: (1) Client generates an Ed25519 keypair; (2) The Ethereum custody address signs an off-chain <code>KeyAddBody</code> EIP-712 struct; (3) The Ed25519 private key signs the message for Proof of Possession (PoP); (4) The resulting <code>KEY_ADD</code> is accepted directly with zero Optimism transaction fees.
+            App keys are authorized off-chain: (1) Client generates an Ed25519 keypair; (2) The Ethereum custody address signs an off-chain EIP-712 <code>KeyAddBody</code> struct; (3) The Ed25519 private key signs for Proof of Possession (PoP); (4) The <code>KEY_ADD</code> is accepted with zero OP ETH gas.
           </p>
         </div>
 
-        <div class="card-clean p-5 space-y-2 border-l-4 border-l-amber-500 bg-amber-50/40">
-          <h3 class="font-bold text-amber-900 text-sm" id="pt3-title">3. Developer Security Guidance (Unix rm Analogy)</h3>
-          <p class="text-amber-800" id="pt3-desc">
-            Like entering <code>rm -rf</code> in Unix, developer software taking a mnemonic seed phrase is intended strictly for developer test accounts. Never enter your cold-storage keys. Dedicated test accounts isolate operational risk while preserving cryptographic authenticity.
+        <div class="card-clean p-4 space-y-1 border-l-4 border-l-amber-500 bg-amber-50/50">
+          <h3 class="font-bold text-amber-950" id="pt3-title">3. Developer Security Guidance (Unix rm Analogy)</h3>
+          <p class="text-amber-900" id="pt3-desc">
+            Like entering <code>rm -rf</code> in Unix, developer software taking a mnemonic seed phrase is intended strictly for developer test accounts. Never enter your cold-storage keys in local dev environments.
           </p>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 6: SOVEREIGN REST API DOCUMENTATION (10 ENDPOINTS FROM README) -->
-    <section id="api" class="space-y-6">
+    <!-- SECTION 6: SOVEREIGN REST API -->
+    <section id="api" class="space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="api-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="api-title">
           Sovereign REST API Documentation
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="api-sub">
-          The client suite exposes a comprehensive, zero-dependency RESTful API engine on <code>http://localhost:3000/api/...</code> (and over your Cloudflare HTTPS domain).
+        <p class="text-xs text-slate-500 mt-0.5" id="api-sub">
+          The suite exposes a complete, zero-dependency RESTful API on <code>http://localhost:3000/api/...</code>:
         </p>
       </div>
 
-      <div class="space-y-3 font-mono text-xs">
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
-            <span class="font-bold text-slate-900 text-xs">/api/node/status</span>
+      <div class="space-y-2 font-mono text-xs">
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/node/status</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Live node health check, latency, peer count, and sync state.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Live health check, ping latency, peer count, synchronization state, and processed message count from the local Snapchain node.</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
-            <span class="font-bold text-slate-900 text-xs">/api/feed</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/feed</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Retrieve protocol casts with client attribution filters (mode, limit, source, viewerFid).</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Retrieve chronological or personalized protocol casts with granular client attribution filtering (<code>mode</code>, <code>limit</code>, <code>source</code>, <code>viewerFid</code>, <code>exclude_client_fids</code>).</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
-            <span class="font-bold text-slate-900 text-xs">/api/casts</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/casts</span>
             <span class="text-slate-400 font-sans text-[11px]">& GET /api/casts/:hash</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Publish a new cast, quote cast, or thread reply directly to the read node mempool.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Publish a new cast, quote cast, or thread reply directly to the read node mempool via signed binary Protobuf. GET fetches ordered reply trees.</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
-            <span class="font-bold text-slate-900 text-xs">/api/reactions</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/reactions</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Submit or retract likes and recasts to the protocol mempool.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Submit or retract likes and recasts to the protocol mempool (<code>type: 'like' | 'recast'</code>, <code>isRemove: boolean</code>).</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
-            <span class="font-bold text-slate-900 text-xs">/api/links</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/links</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Follow or unfollow users via protocol-level LinkAdd / LinkRemove messages.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Follow or unfollow users via protocol-level <code>LinkAdd</code> / <code>LinkRemove</code> messages.</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
-            <span class="font-bold text-slate-900 text-xs">/api/users/:id</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/users/:id</span>
             <span class="text-slate-400 font-sans text-[11px]">& /api/users/:id/casts & /api/users/search</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Fetch user profile metadata, bio, follower count, and published casts.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Fetch user profile metadata, bio, follower count, and custody address by numeric FID or username. Retrieve chronological user casts.</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
-            <span class="font-bold text-slate-900 text-xs">/api/wallet/tokens?fid=...</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">GET</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/wallet/tokens?fid=...</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Query live on-chain token holdings and valuation across Ethereum and Base.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Query live on-chain token holdings, balances, and USD valuation across <strong>Ethereum</strong> and <strong>Base</strong> networks.</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
-            <span class="font-bold text-slate-900 text-xs">/api/upload</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/upload</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Upload images for cast embeds with server-side magic byte verification.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Upload images for cast embeds with server-side magic byte verification (supports JPEG, PNG, GIF, WebP up to 10 MB).</p>
         </div>
 
-        <div class="card-clean p-4 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
-            <span class="font-bold text-slate-900 text-xs">/api/auth/login</span>
+        <div class="card-clean p-3 flex items-start gap-2.5">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">POST</span>
+          <div>
+            <span class="font-bold text-slate-900">/api/auth/login</span>
+            <p class="text-slate-500 font-sans text-xs mt-0.5">Authorize an EIP-712 gasless app signer without blockchain transactions or OP ETH.</p>
           </div>
-          <p class="text-slate-600 font-sans text-xs">Authenticate using your 24-word recovery phrase. Automatically derives custody address and registers a gasless Ed25519 app signer via EIP-712 without OP ETH.</p>
         </div>
       </div>
     </section>
 
-    <!-- SECTION 7: 59-SECOND VERTICAL VIDEO STORYBOARD -->
-    <section id="video" class="space-y-6">
+    <!-- SECTION 7: PEER VERIFICATION & VOUCHER -->
+    <section id="voucher" class="card-clean p-5 sm:p-6 space-y-4">
       <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="vid-title">
-          59-Second Vertical Video Storyboard
-        </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="vid-sub">
-          Engineered for fast-paced short-form video demonstration across X, Farcaster, and mobile video feeds.
-        </p>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 font-mono text-xs">
-        <div class="card-clean p-4 space-y-2">
-          <span class="text-[10px] text-purple-700 font-bold block">00:00 - 00:08</span>
-          <h4 class="font-bold text-slate-900 font-sans text-xs">Scene 1: The Problem</h4>
-          <p class="text-[11px] text-slate-600 font-sans">"How do you run your own sovereign Farcaster node and client with zero API keys in under 60 seconds?"</p>
-        </div>
-        <div class="card-clean p-4 space-y-2">
-          <span class="text-[10px] text-purple-700 font-bold block">00:08 - 00:22</span>
-          <h4 class="font-bold text-slate-900 font-sans text-xs">Scene 2: 1-Command Setup</h4>
-          <p class="text-[11px] text-slate-600 font-sans">"Run one terminal command: it configures compute, streams Snapchain, and boots your client. Done."</p>
-        </div>
-        <div class="card-clean p-4 space-y-2">
-          <span class="text-[10px] text-purple-700 font-bold block">00:22 - 00:36</span>
-          <h4 class="font-bold text-slate-900 font-sans text-xs">Scene 3: Gasless Keys</h4>
-          <p class="text-[11px] text-slate-600 font-sans">"Zero Optimism gas required. App keys are authorized off-chain via EIP-712 custody signatures."</p>
-        </div>
-        <div class="card-clean p-4 space-y-2">
-          <span class="text-[10px] text-purple-700 font-bold block">00:36 - 00:48</span>
-          <h4 class="font-bold text-slate-900 font-sans text-xs">Scene 4: Client Filtering</h4>
-          <p class="text-[11px] text-slate-600 font-sans">"Filter out Warpcast or Supercast with a single click to curate your own autonomous community."</p>
-        </div>
-        <div class="card-clean p-4 space-y-2">
-          <span class="text-[10px] text-purple-700 font-bold block">00:48 - 00:59</span>
-          <h4 class="font-bold text-slate-900 font-sans text-xs">Scene 5: Open Source</h4>
-          <p class="text-[11px] text-slate-600 font-sans">"Fully open-source under MIT license. 100% reproducible by independent node operators."</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- SECTION 8: PEER VERIFICATION & HUMAN VOUCHER GUIDE -->
-    <section id="voucher" class="card-clean p-6 sm:p-8 space-y-5">
-      <div>
-        <h2 class="text-2xl font-black text-slate-900 tracking-tight" id="vch-title">
+        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="vch-title">
           Peer Verification & Human Voucher Checklist
         </h2>
-        <p class="text-xs sm:text-sm text-slate-600 mt-1" id="vch-sub">
-          A 3-minute reproducible checklist for peer reviewers and node operators to verify and endorse on Farcaster:
+        <p class="text-xs text-slate-500 mt-0.5" id="vch-sub">
+          A 3-minute reproducible test checklist for community reviewers to endorse on Farcaster:
         </p>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
-        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-          <span class="text-purple-700 font-bold font-sans">Step 1: Run Quickstart</span>
-          <p class="text-slate-600 font-sans text-[11px]">Run script 0 on clean Ubuntu/AWS box. Confirm Docker boots.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <span class="text-purple-700 font-bold font-sans block mb-0.5">Step 1: Quickstart</span>
+          <p class="text-slate-600 font-sans text-[11px]">Run script 0 on clean VPS. Confirm Docker boots.</p>
         </div>
-        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-          <span class="text-purple-700 font-bold font-sans">Step 2: Check Node Health</span>
-          <p class="text-slate-600 font-sans text-[11px]">Run curl http://127.0.0.1:3381/v1/info and confirm HTTP 200 OK.</p>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <span class="text-purple-700 font-bold font-sans block mb-0.5">Step 2: Node Health</span>
+          <p class="text-slate-600 font-sans text-[11px]">Confirm curl :3381/v1/info returns 200 OK.</p>
         </div>
-        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-          <span class="text-purple-700 font-bold font-sans">Step 3: Issue Gasless Key</span>
-          <p class="text-slate-600 font-sans text-[11px]">Authorize an EIP-712 signer with zero OP ETH via client UI.</p>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <span class="text-purple-700 font-bold font-sans block mb-0.5">Step 3: Gasless Key</span>
+          <p class="text-slate-600 font-sans text-[11px]">Issue EIP-712 signer with zero OP ETH.</p>
         </div>
-        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-          <span class="text-purple-700 font-bold font-sans">Step 4: Endorse Cast</span>
-          <p class="text-slate-600 font-sans text-[11px]">Publish your endorsement cast on Farcaster referencing author @mohammad98.</p>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <span class="text-purple-700 font-bold font-sans block mb-0.5">Step 4: Endorse Cast</span>
+          <p class="text-slate-600 font-sans text-[11px]">Publish endorsement cast referencing @mohammad98.</p>
         </div>
       </div>
 
-      <div class="border-t border-slate-200 pt-4 space-y-2">
-        <span class="text-xs font-semibold text-slate-800" id="lbl-voucher-template">Sample Endorsement Cast Template (Click to Copy):</span>
-        <div class="bg-slate-100 rounded-xl p-3 border border-slate-300 flex items-center justify-between gap-3 text-xs font-mono">
-          <p class="text-slate-800 select-all break-all">Verified @mohammad98's Farcaster Snapchain Suite on a clean Ubuntu VPS. 3 commands booted the node on :3381 and launched the sovereign client with gasless EIP-712 signers. https://github.com/mohammadma98/farcaster-snapchain-node-client</p>
-          <button onclick="copySnippet(this, 'Verified @mohammad98\'s Farcaster Snapchain Suite on a clean Ubuntu VPS. 3 commands booted the node on :3381 and launched the sovereign client with gasless EIP-712 signers. https://github.com/mohammadma98/farcaster-snapchain-node-client')" class="px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shrink-0">Copy</button>
+      <div class="border-t border-slate-200 pt-3 space-y-1.5">
+        <span class="text-xs font-semibold text-slate-700" id="lbl-voucher-template">Sample Endorsement Cast Template (Click to Copy):</span>
+        <div class="bg-slate-100 rounded-lg p-2.5 border border-slate-300 flex items-center justify-between gap-3 text-xs font-mono">
+          <p class="text-slate-800 select-all break-all text-[11px]">Verified @mohammad98's Farcaster Snapchain Suite on a clean Ubuntu VPS. 3 commands booted the node on :3381 and launched the sovereign client with gasless EIP-712 signers. https://github.com/mohammadma98/farcaster-snapchain-node-client</p>
+          <button onclick="copySnippet(this, 'Verified @mohammad98\'s Farcaster Snapchain Suite on a clean Ubuntu VPS. 3 commands booted the node on :3381 and launched the sovereign client with gasless EIP-712 signers. https://github.com/mohammadma98/farcaster-snapchain-node-client')" class="px-2.5 py-1 rounded bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold shrink-0">Copy</button>
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- FOOTER -->
-  <footer class="border-t border-slate-200 bg-white py-10 px-4 sm:px-6 text-xs text-slate-500 mt-16">
-    <div class="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+  <!-- MINIMAL FOOTER -->
+  <footer class="border-t border-slate-200 bg-white py-8 px-4 sm:px-6 text-xs text-slate-500 mt-12">
+    <div class="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
       <div class="flex items-center gap-2">
-        <span class="flex h-6 w-6 items-center justify-center rounded bg-purple-700 text-white font-bold text-xs">FC</span>
+        <span class="flex h-5 w-5 items-center justify-center rounded bg-purple-700 text-white font-bold text-[10px]">FC</span>
         <span class="font-bold text-slate-800">Farcaster Snapchain Suite</span>
-        <span>· Released under MIT License</span>
+        <span>· MIT License</span>
       </div>
 
       <div class="flex items-center gap-4 text-slate-600 font-medium">
-        <a href="https://github.com/mohammadma98/farcaster-snapchain-node-client" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">GitHub Repository</a>
+        <a href="https://github.com/mohammadma98/farcaster-snapchain-node-client" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">GitHub</a>
         <a href="https://snapchain.farcaster.xyz" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">Snapchain Docs</a>
         <a href="https://docs.farcaster.xyz" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">Protocol Specs</a>
-        <a href="https://farcaster.xyz/mohammad98" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">Author (@mohammad98)</a>
+        <a href="https://farcaster.xyz/mohammad98" target="_blank" rel="noopener noreferrer" class="hover:text-purple-700 transition-colors">@mohammad98</a>
       </div>
     </div>
   </footer>
 
-  <!-- CLIENT SCRIPTS -->
+  <!-- MINIMAL CLIENT SCRIPT -->
   <script>
     let currentLang = 'en';
 
@@ -597,62 +535,50 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 
     const translations = {
       en: {
-        navQs: '1-Command Quickstart',
-        navStages: '3 Stages',
-        navFeatures: 'Features',
-        navBenchmarks: 'Benchmarks',
+        navQs: 'Quickstart',
         navArch: 'Architecture',
-        navApi: 'REST API',
-        navVoucher: 'Voucher',
-        heroBadge: '🟣 Open Source · MIT · Zero Third-Party API Keys',
-        heroTitle: 'Farcaster Snapchain Read Node & Sovereign Web Client.',
-        heroDesc: 'A production-grade, sovereign Farcaster node and web client suite requiring zero third-party API keys. Engineered for developers, decentralization advocates, and censorship-resistant communities seeking total protocol sovereignty.',
-        qsBadge: '⚡ Single-Command Autonomous Quickstart',
+        navApi: 'API',
+        heroBadge: 'Open Source · MIT License · Zero Third-Party API Keys',
+        heroTitle: 'Read and post on Farcaster from your own server.',
+        heroDesc: 'A production-grade, sovereign Farcaster node and web client suite requiring zero third-party API keys. Run your own independent infrastructure in one command.',
+        qsBadge: 'Single-Command Autonomous Setup',
         qsTitle: 'Just ONE Command!',
         qsSub: 'Deploy a personal Farcaster Snapchain Read Node and Sovereign Web Client on any clean Ubuntu 22.04+ server (or AWS EC2 instance) with a single command:',
-        qsNote: 'Once executed, the automated pipeline performs all work sequentially across 3 integrated stages: Server Configuration (0) → Snapchain High-Speed Ingestion (1) → Web Client, Indexer & Cloudflare SSL Tunnel (2).',
+        qsNote: 'How it works: The pipeline executes all 3 stages sequentially: Server Tuning (0) → Snapchain RocksDB Streaming (1) → Web Client & Cloudflare SSL Tunnel (2).',
         stagesTitle: 'The 3 Sequential Stages',
-        stagesSub: 'While the single command above runs the entire pipeline end-to-end autonomously, you can also execute each modular script independently whenever needed:',
+        stagesSub: 'While the single command above runs the entire pipeline end-to-end autonomously, you can also execute each modular script independently:',
         featTitle: 'Key Features & Capabilities',
-        featSub: 'Engineered for maximum reliability, minimal resource footprint, and zero operational dependencies.',
+        featSub: 'Engineered for minimal resource footprint, maximum reliability, and zero third-party dependencies.',
         bmTitle: 'Tested Server Benchmarks & Hosting Providers',
-        bmSub: 'This suite has been rigorously tested and benchmarked across diverse real-world hardware profiles:',
+        bmSub: 'Benchmarked across real-world hardware profiles:',
         archTitle: 'System Architecture & Protocol Mechanics',
-        archSub: 'How data flows from your sovereign client through your standalone read node and into the decentralized validator network.',
+        archSub: 'Direct mempool writes, gasless signing, and CometBFT consensus flow:',
         apiTitle: 'Sovereign REST API Documentation',
-        apiSub: 'The client suite exposes a comprehensive, zero-dependency RESTful API engine on http://localhost:3000/api/... (and over your Cloudflare HTTPS domain).',
-        vidTitle: '59-Second Vertical Video Storyboard',
-        vidSub: 'Engineered for fast-paced short-form video demonstration across X, Farcaster, and mobile video feeds.',
+        apiSub: 'The suite exposes a complete, zero-dependency RESTful API on http://localhost:3000/api/...:',
         vchTitle: 'Peer Verification & Human Voucher Checklist',
-        vchSub: 'A 3-minute reproducible checklist for peer reviewers and node operators to verify and endorse on Farcaster:',
+        vchSub: 'A 3-minute reproducible test checklist for community reviewers to endorse on Farcaster:',
       },
       zh: {
-        navQs: '单命令极速起步',
-        navStages: '3个阶段',
-        navFeatures: '核心特性',
-        navBenchmarks: '实测基准',
+        navQs: '快速入门',
         navArch: '系统架构',
-        navApi: 'REST API 接口',
-        navVoucher: '同行背书',
-        heroBadge: '🟣 完全开源 · MIT 协议 · 零第三方 API 密钥',
-        heroTitle: '主权级 Farcaster 只读节点与 Web 客户端。',
-        heroDesc: '工业级、完全主权的 Farcaster 节点与 Web 客户端套件，无需任何第三方 API 密钥。专为追求极致协议主权与抗审查去中心会社区设计。',
-        qsBadge: '⚡ 单命令全自动极速起步',
+        navApi: 'API 接口',
+        heroBadge: '开源代码 · MIT 协议 · 零第三方 API 密钥',
+        heroTitle: '在属于你自己的服务器上独立运行 Farcaster。',
+        heroDesc: '工业级、完全主权的 Farcaster 节点与 Web 客户端套件，无需任何第三方 API 密钥。一条命令即可运行自主基础设施。',
+        qsBadge: '单命令全自动极速起步',
         qsTitle: '仅需 1 条命令！(Just ONE Command)',
         qsSub: '在任何干净的 Ubuntu 22.04+ 服务器（或 AWS EC2 实例）上仅需一条命令即可完成全套部署：',
-        qsNote: '执行后，自动化流水线将按序连跑 3 个集成阶段：服务器环境调优 (0) → Snapchain 高速流式同步 (1) → Web 客户端、索引器与 Cloudflare SSL 自动化隧道 (2)。',
+        qsNote: '执行逻辑：自动化流水线将按序连跑 3 个阶段：服务器调优 (0) → Snapchain RocksDB 流式同步 (1) → Web 客户端与 Cloudflare SSL 隧道 (2)。',
         stagesTitle: '3 个模块化阶段',
         stagesSub: '单命令可全自动跑通全流程，亦可根据需要独立执行各个模块化脚本：',
         featTitle: '核心特性与技术优势',
-        featSub: '专为高可靠性、极低资源占用与零第三方依赖而深度工程化。',
+        featSub: '专为极低资源占用、高可靠性与零第三方依赖深度工程化。',
         bmTitle: '云主机实测基准与硬件成本',
-        bmSub: '本套件在多种不同层级的真实硬件配置下进行了严苛的基准测试：',
+        bmSub: '在真实硬件配置下经过严格基准测试：',
         archTitle: '系统拓扑架构与协议原语',
-        archSub: '从自主客户端到本地独立只读节点，再到去中心化验证者网络的完整数据流转机制。',
+        archSub: '直接写入内存池、无 Gas 签名及 CometBFT 共识流转机制：',
         apiTitle: '主权 REST API 完整接口文档',
-        apiSub: '套件在 http://localhost:3000/api/...（及 Cloudflare 公网 HTTPS 域名）暴露了完整的无依赖 RESTful API 引擎。',
-        vidTitle: '59 秒竖屏演示分镜脚本',
-        vidSub: '专为 X、Farcaster 及移动端短视频信息流定制的快节奏技术展示。',
+        apiSub: '套件在 http://localhost:3000/api/... 暴露了无依赖 RESTful API 引擎：',
         vchTitle: '同行独立验证与真人背书清单',
         vchSub: '社区测试者与节点运维人员可在 3 分钟内独立复现并公开发布背书 Cast：',
       }
@@ -663,25 +589,21 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
       const t = translations[lang];
 
       document.getElementById('btn-lang-en').className = lang === 'en' 
-        ? 'px-2.5 py-1 rounded-md bg-white text-purple-700 shadow-xs transition-all'
-        : 'px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-900 transition-all';
+        ? 'px-2 py-0.5 rounded bg-white text-purple-700 shadow-xs transition-all'
+        : 'px-2 py-0.5 text-slate-500 hover:text-slate-900 transition-all';
       document.getElementById('btn-lang-zh').className = lang === 'zh' 
-        ? 'px-2.5 py-1 rounded-md bg-white text-purple-700 shadow-xs transition-all'
-        : 'px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-900 transition-all';
+        ? 'px-2 py-0.5 rounded bg-white text-purple-700 shadow-xs transition-all'
+        : 'px-2 py-0.5 text-slate-500 hover:text-slate-900 transition-all';
 
       document.getElementById('nav-qs').textContent = t.navQs;
-      document.getElementById('nav-stages').textContent = t.navStages;
-      document.getElementById('nav-features').textContent = t.navFeatures;
-      document.getElementById('nav-benchmarks').textContent = t.navBenchmarks;
       document.getElementById('nav-arch').textContent = t.navArch;
       document.getElementById('nav-api').textContent = t.navApi;
-      document.getElementById('nav-voucher').textContent = t.navVoucher;
 
-      document.getElementById('hero-badge').innerHTML = t.heroBadge;
+      document.getElementById('hero-badge').textContent = t.heroBadge;
       document.getElementById('hero-title').innerHTML = t.heroTitle;
       document.getElementById('hero-desc').textContent = t.heroDesc;
 
-      document.getElementById('qs-badge').innerHTML = t.qsBadge;
+      document.getElementById('qs-badge').textContent = t.qsBadge;
       document.getElementById('qs-title').textContent = t.qsTitle;
       document.getElementById('qs-sub').textContent = t.qsSub;
       document.getElementById('qs-note').innerHTML = t.qsNote;
@@ -700,9 +622,6 @@ curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-nod
 
       document.getElementById('api-title').textContent = t.apiTitle;
       document.getElementById('api-sub').textContent = t.apiSub;
-
-      document.getElementById('vid-title').textContent = t.vidTitle;
-      document.getElementById('vid-sub').textContent = t.vidSub;
 
       document.getElementById('vch-title').textContent = t.vchTitle;
       document.getElementById('vch-sub').textContent = t.vchSub;
