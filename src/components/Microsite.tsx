@@ -17,8 +17,7 @@ import {
   Lock,
   Radio,
   BookOpen,
-  Video,
-  HeartHandshake,
+    HeartHandshake,
   ArrowRight,
   Code2,
 } from 'lucide-react';
@@ -69,27 +68,15 @@ export function Microsite({ onOpenClient }: MicrositeProps) {
           </a>
 
           {/*  */}
-          <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-slate-600">
+          <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-600">
             <a href="#quickstart" className="hover:text-purple-700 transition-colors">
-              {isZh ? '单命令极速起步' : '1-Command Quickstart'}
-            </a>
-            <a href="#stages" className="hover:text-purple-700 transition-colors">
-              {isZh ? '3个阶段' : '3 Stages'}
-            </a>
-            <a href="#features" className="hover:text-purple-700 transition-colors">
-              {isZh ? '核心特性' : 'Features'}
-            </a>
-            <a href="#benchmarks" className="hover:text-purple-700 transition-colors">
-              {isZh ? '实测基准' : 'Benchmarks'}
+              {isZh ? '极速起步' : 'Quickstart'}
             </a>
             <a href="#architecture" className="hover:text-purple-700 transition-colors">
-              {isZh ? '系统架构' : 'Architecture'}
+              {isZh ? '架构' : 'Architecture'}
             </a>
             <a href="#api" className="hover:text-purple-700 transition-colors">
-              {isZh ? 'REST API 接口' : 'REST API'}
-            </a>
-            <a href="#voucher" className="hover:text-purple-700 transition-colors">
-              {isZh ? '同行背书' : 'Voucher'}
+              {isZh ? 'API 接口' : 'API'}
             </a>
           </nav>
 
@@ -633,47 +620,7 @@ export function Microsite({ onOpenClient }: MicrositeProps) {
           </div>
         </section>
 
-        {/*  */}
-        <section id="video" className="space-y-6">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-              {isZh ? '59 秒竖屏演示分镜脚本' : '59-Second Vertical Video Storyboard'}
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1">
-              {isZh
-                ? '专为 X、Farcaster 及移动端短视频信息流定制的快节奏技术展示。'
-                : 'Engineered for fast-paced short-form video demonstration across X, Farcaster, and mobile video feeds.'}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 font-mono text-xs">
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-              <span className="text-[10px] text-purple-700 font-bold block">00:00 - 00:08</span>
-              <h4 className="font-bold text-slate-900 font-sans text-xs">Scene 1: The Problem</h4>
-              <p className="text-[11px] text-slate-600 font-sans">&quot;How do you run your own sovereign Farcaster node and client with zero API keys in under 60 seconds?&quot;</p>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-              <span className="text-[10px] text-purple-700 font-bold block">00:08 - 00:22</span>
-              <h4 className="font-bold text-slate-900 font-sans text-xs">Scene 2: 1-Command Setup</h4>
-              <p className="text-[11px] text-slate-600 font-sans">&quot;Run one terminal command: it configures compute, streams Snapchain, and boots your client. Done.&quot;</p>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-              <span className="text-[10px] text-purple-700 font-bold block">00:22 - 00:36</span>
-              <h4 className="font-bold text-slate-900 font-sans text-xs">Scene 3: Gasless Keys</h4>
-              <p className="text-[11px] text-slate-600 font-sans">&quot;Zero Optimism gas required. App keys are authorized off-chain via EIP-712 custody signatures.&quot;</p>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-              <span className="text-[10px] text-purple-700 font-bold block">00:36 - 00:48</span>
-              <h4 className="font-bold text-slate-900 font-sans text-xs">Scene 4: Client Filtering</h4>
-              <p className="text-[11px] text-slate-600 font-sans">&quot;Filter out Warpcast or Supercast with a single click to curate your own autonomous community.&quot;</p>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-              <span className="text-[10px] text-purple-700 font-bold block">00:48 - 00:59</span>
-              <h4 className="font-bold text-slate-900 font-sans text-xs">Scene 5: Open Source</h4>
-              <p className="text-[11px] text-slate-600 font-sans">&quot;Fully open-source under MIT license. 100% reproducible by independent node operators.&quot;</p>
-            </div>
-          </div>
-        </section>
+        
 
         {/*  */}
         <section id="voucher" className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5 shadow-xs">
