@@ -40,19 +40,71 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Pre-Flight: Check if Snapchain Read Node or Sync Worker is Already Active
+# Pre-Flight State & Environment Evaluation (Prioritized Detection)
 # ------------------------------------------------------------------------------
 CHECK_SNAPCHAIN_DIR="${HOME}/snapchain"
+CONFIG_EXISTS=false
 if [ -f "/etc/snapchain/snapchain.conf" ]; then
     # shellcheck source=/dev/null
     source "/etc/snapchain/snapchain.conf" 2>/dev/null || true
     CHECK_SNAPCHAIN_DIR="${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}"
+    if [ "${PROVISIONED:-false}" == "true" ]; then
+        CONFIG_EXISTS=true
+    fi
 elif [ -f "${HOME}/.snapchain.conf" ]; then
     # shellcheck source=/dev/null
     source "${HOME}/.snapchain.conf" 2>/dev/null || true
     CHECK_SNAPCHAIN_DIR="${SNAPCHAIN_DATA_DIR:-${HOME}/snapchain}"
+    if [ "${PROVISIONED:-false}" == "true" ]; then
+        CONFIG_EXISTS=true
+    fi
 fi
 
+# PRIORITY 1: Check if an active background snapshot download worker is currently running
+WORKER_PID_FILE="${CHECK_SNAPCHAIN_DIR}/.snapshot_worker.pid"
+IS_WORKER_ACTIVE=false
+W_PID=""
+
+if [ -f "$WORKER_PID_FILE" ]; then
+    W_PID=$(cat "$WORKER_PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$W_PID" ] && kill -0 "$W_PID" 2>/dev/null; then
+        IS_WORKER_ACTIVE=true
+    fi
+fi
+
+if [ "$IS_WORKER_ACTIVE" != "true" ] && pgrep -f "snapshot_worker.sh" > /dev/null 2>&1; then
+    IS_WORKER_ACTIVE=true
+    W_PID=$(pgrep -f "snapshot_worker.sh" | head -n 1 || echo "")
+fi
+
+if [ "$IS_WORKER_ACTIVE" == "true" ]; then
+    ROCKS_SZ="Unknown"
+    if [ -d "${CHECK_SNAPCHAIN_DIR}/.rocks" ]; then
+        ROCKS_SZ=$(du -sh "${CHECK_SNAPCHAIN_DIR}/.rocks" 2>/dev/null | awk '{print $1}')
+    fi
+    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ Active background snapshot sync pipeline detected (PID: ${W_PID:-active})!${NC}"
+    echo -e "${GREEN}${BOLD}================================================================${NC}"
+    echo -e "  • Target Data Dir: ${BOLD}${CHECK_SNAPCHAIN_DIR}${NC}"
+    echo -e "  • RocksDB In-Disk: ${BOLD}${ROCKS_SZ}${NC}"
+    echo -e "  • Status:          Worker actively downloading in the background."
+    echo -e "\n${CYAN}${BOLD}• Proceeding directly to Step (2/3) to attach to live progress monitor...${NC}\n"
+
+    if [ -f "./scripts/1-setup-read-node.sh" ]; then
+        exec bash "./scripts/1-setup-read-node.sh"
+    elif [ -f "./1-setup-read-node.sh" ]; then
+        exec bash "./1-setup-read-node.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
+    else
+        TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+        chmod +x "$TMP_SCRIPT"
+        exec bash "$TMP_SCRIPT"
+    fi
+fi
+
+# PRIORITY 2: If NO worker is running, check if Snapchain Read Node is already operational
 DOCKER_CMD="docker"
 if ! docker info >/dev/null 2>&1 && [ -n "$SUDO" ] && $SUDO docker info >/dev/null 2>&1; then
     DOCKER_CMD="$SUDO docker"
@@ -75,7 +127,6 @@ for s in 0 1 2; do
     fi
 done
 
-# If node is fully up or all shards are already materialized, inform operator and jump straight to Step 3
 if [ "$HTTP_ACTIVE" == "true" ] || [ "$CONTAINER_ACTIVE" == "true" ] || [ "$ALL_SHARDS_PRESENT" == "true" ]; then
     DB_SIZE="Unknown"
     if [ -d "${CHECK_SNAPCHAIN_DIR}/.rocks" ]; then
@@ -105,29 +156,29 @@ if [ "$HTTP_ACTIVE" == "true" ] || [ "$CONTAINER_ACTIVE" == "true" ] || [ "$ALL_
     fi
 fi
 
-# Check if active background sync worker is running
-WORKER_PID_FILE="${CHECK_SNAPCHAIN_DIR}/.snapshot_worker.pid"
-if [ -f "$WORKER_PID_FILE" ]; then
-    W_PID=$(cat "$WORKER_PID_FILE" 2>/dev/null || echo "")
-    if [ -n "$W_PID" ] && kill -0 "$W_PID" 2>/dev/null; then
-        echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-        echo -e "${GREEN}${BOLD}  ✓ Active background snapshot sync pipeline detected (PID: ${W_PID})!${NC}"
-        echo -e "${GREEN}${BOLD}================================================================${NC}"
-        echo -e "  Notice: Snapshot ingestion is actively running in the background."
-        echo -e "${CYAN}${BOLD}• Proceeding directly to Step (2/3) to attach to live progress monitor...${NC}\n"
+# PRIORITY 3: Node is not running & port not answering, but Step (1/3) config file already exists!
+if [ "$CONFIG_EXISTS" == "true" ]; then
+    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ System environment already provisioned (/etc/snapchain/snapchain.conf)!${NC}"
+    echo -e "${GREEN}${BOLD}================================================================${NC}"
+    echo -e "  • CPU Profile:     ${BOLD}[${PROFILE_CPU:-C2}]${NC} (${CPU_CORES:-1} Cores)"
+    echo -e "  • RAM Profile:     ${BOLD}[${PROFILE_RAM:-R2}]${NC} (${RAM_GB:-4} GB)"
+    echo -e "  • Disk Profile:    ${BOLD}[${PROFILE_DISK:-D2}]${NC} (${DISK_TYPE:-SSD})"
+    echo -e "  • Target Data Dir: ${BOLD}${CHECK_SNAPCHAIN_DIR}${NC}\n"
+    echo -e "  Notice: Compute environment and dependencies are already configured."
+    echo -e "${CYAN}${BOLD}• Proceeding directly to Step (2/3) [Setup Read Node]...${NC}\n"
 
-        if [ -f "./scripts/1-setup-read-node.sh" ]; then
-            exec bash "./scripts/1-setup-read-node.sh"
-        elif [ -f "./1-setup-read-node.sh" ]; then
-            exec bash "./1-setup-read-node.sh"
-        elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
-            exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
-        else
-            TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
-            curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
-            chmod +x "$TMP_SCRIPT"
-            exec bash "$TMP_SCRIPT"
-        fi
+    if [ -f "./scripts/1-setup-read-node.sh" ]; then
+        exec bash "./scripts/1-setup-read-node.sh"
+    elif [ -f "./1-setup-read-node.sh" ]; then
+        exec bash "./1-setup-read-node.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/1-setup-read-node.sh"
+    else
+        TMP_SCRIPT=$(mktemp /tmp/snapchain_step1.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/1-setup-read-node.sh?v=$(date +%s)" -o "$TMP_SCRIPT"
+        chmod +x "$TMP_SCRIPT"
+        exec bash "$TMP_SCRIPT"
     fi
 fi
 

@@ -165,35 +165,23 @@ fi
 
 if [ "${PROVISIONED:-false}" != "true" ]; then
     echo -e "\n${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}${BOLD}  ⚠ Notice: Step (0) [Compute Provisioning] Required First      ${NC}"
+    echo -e "${YELLOW}${BOLD}  Notice: Step [1/3] (Compute Provisioning) Required First      ${NC}"
     echo -e "${YELLOW}${BOLD}================================================================${NC}"
-    echo -e "${YELLOW}Step (0) has not been executed yet on this server.${NC}"
-    echo -e "You must run Command (0) first to prepare hardware profiles, allocate storage,"
-    echo -e "tune Linux kernel socket buffers, and install container runtimes.\n"
+    echo -e "  Step [1/3] has not been executed yet on this server."
+    echo -e "${CYAN}${BOLD}• Automatically launching Step [1/3] to provision compute & dependencies...${NC}\n"
 
-    RUN_STEP0=$(prompt_user "Would you like to automatically run Step (0) [Provision Compute] now? [Y/n]: " "y")
-    case "$RUN_STEP0" in
-        [yY]|[yY][eE][sS])
-            echo -e "\n${CYAN}${BOLD}Launching Step (0): Provisioning Compute & Storage Matrix...${NC}\n"
-            if [ -f "./scripts/0-provision-compute.sh" ]; then
-                exec bash "./scripts/0-provision-compute.sh"
-            elif [ -f "./0-provision-compute.sh" ]; then
-                exec bash "./0-provision-compute.sh"
-            elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh" ]; then
-                exec bash "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh"
-            else
-                TMP_STEP0=$(mktemp /tmp/snapchain_step0.XXXXXX.sh)
-                curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh?v=$(date +%s)" -o "$TMP_STEP0"
-                chmod +x "$TMP_STEP0"
-                exec bash "$TMP_STEP0"
-            fi
-            ;;
-        *)
-            echo -e "\n${RED}[ABORTED] Please run Command (0) first to prepare this server:${NC}"
-            echo -e "${CYAN}${BOLD}curl -sSL https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh | bash${NC}\n"
-            exit 1
-            ;;
-    esac
+    if [ -f "./scripts/0-provision-compute.sh" ]; then
+        exec bash "./scripts/0-provision-compute.sh"
+    elif [ -f "./0-provision-compute.sh" ]; then
+        exec bash "./0-provision-compute.sh"
+    elif [ -f "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh" ]; then
+        exec bash "${HOME}/farcaster-snapchain-node-client/scripts/0-provision-compute.sh"
+    else
+        TMP_STEP0=$(mktemp /tmp/snapchain_step0.XXXXXX.sh)
+        curl -fsSL "https://raw.githubusercontent.com/mohammadma98/farcaster-snapchain-node-client/main/scripts/0-provision-compute.sh?v=$(date +%s)" -o "$TMP_STEP0"
+        chmod +x "$TMP_STEP0"
+        exec bash "$TMP_STEP0"
+    fi
 fi
 
 PROFILE_CPU="${PROFILE_CPU:-C2}"
