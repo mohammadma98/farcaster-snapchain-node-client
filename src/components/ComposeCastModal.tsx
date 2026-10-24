@@ -39,6 +39,11 @@ interface ComposeCastModalProps {
   ) => Promise<boolean>;
   quoteCast?: FarcasterCast | null;
   onClearQuote?: () => void;
+  nodeSyncState?: {
+    isSyncing: boolean;
+    remainingBlocks?: number;
+    estimatedTimeFormatted?: string;
+  };
 }
 
 const MAX_IMAGES = 3;
@@ -52,6 +57,7 @@ export function ComposeCastModal({
   onPublish,
   quoteCast,
   onClearQuote,
+  nodeSyncState,
 }: ComposeCastModalProps) {
   const [text, setText] = useState('');
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -237,6 +243,7 @@ export function ComposeCastModal({
     !isPublishing &&
     !isAnyUploading &&
     !hasFailedUpload &&
+    !nodeSyncState?.isSyncing &&
     (text.trim().length > 0 || attachedImages.length > 0);
 
   const handleSubmit = async () => {
@@ -472,6 +479,21 @@ export function ComposeCastModal({
               <p className="text-xs text-slate-700 line-clamp-2 italic">
                 "{quoteCast.text}"
               </p>
+            </div>
+          )}
+
+          {/* Read-Only Mode Notice when node is syncing */}
+          {nodeSyncState?.isSyncing && (
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+              <RefreshCw className="h-4 w-4 shrink-0 text-amber-600 animate-spin mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-bold flex items-center gap-1.5">
+                  <span>Node in Read-Only Mode (Syncing)</span>
+                </span>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Your local Snapchain node is currently synchronizing with the blockchain (~{(nodeSyncState.remainingBlocks || 0).toLocaleString()} blocks remaining{nodeSyncState.estimatedTimeFormatted ? `, est. ~${nodeSyncState.estimatedTimeFormatted}` : ''}). Submitting casts and reactions requires complete blockchain sync.
+                </p>
+              </div>
             </div>
           )}
 

@@ -157,6 +157,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     peerCount?: number;
     numMessages?: number;
     version?: string;
+    isSyncing?: boolean;
+    maxBlockDelay?: number;
+    remainingBlocks?: number;
+    estimatedTimeFormatted?: string;
+    shardInfos?: Array<{ shardId: number; maxHeight: number; blockDelay: number }>;
   }>({ isOnline: false, latencyMs: 0 });
   const [isPinging, setIsPinging] = useState(false);
 
@@ -432,6 +437,10 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     }
 
     pingNode();
+    const nodePingInterval = setInterval(() => {
+      pingNode();
+    }, 15000);
+
     fetchFeed(
       sourceFilter,
       initialViewerFid ? 'following' : 'global',
@@ -439,6 +448,8 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       initialFollowsSet
     );
     fetchSuggestedUsers();
+
+    return () => clearInterval(nodePingInterval);
   }, []);
 
   // Save session when updated
@@ -910,6 +921,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
       return false;
     }
 
+    if (nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50) {
+      showToast(
+        `Node in Read-Only Mode: Fast-syncing (~${(nodeHealth.remainingBlocks || 0).toLocaleString()} blocks remaining). Submitting casts enabled once synced.`
+      );
+      return false;
+    }
+
     try {
       const res = await fetch('/api/casts', {
         method: 'POST',
@@ -997,6 +1015,13 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
     if (!session || !session.signerPrivateKey) {
       setIsAuthModalOpen(true);
       showToast('Please log in with your Farcaster account to like or recast.');
+      return;
+    }
+
+    if (nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50) {
+      showToast(
+        `Node in Read-Only Mode: Fast-syncing with blockchain (~${(nodeHealth.remainingBlocks || 0).toLocaleString()} blocks remaining${nodeHealth.estimatedTimeFormatted ? `, est. ~${nodeHealth.estimatedTimeFormatted}` : ''}). Reactions enabled once synced.`
+      );
       return;
     }
 
@@ -1302,18 +1327,34 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
             <div
               className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
                 nodeHealth.isOnline
-                  ? 'border-emerald-200 bg-emerald-50/70 text-emerald-800'
+                  ? nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50
+                    ? 'border-amber-300 bg-amber-50/80 text-amber-900'
+                    : 'border-emerald-200 bg-emerald-50/70 text-emerald-800'
                   : 'border-slate-200 bg-slate-100 text-slate-600'
               }`}
-              title={nodeHealth.isOnline ? `Local Node Synced (${nodeHealth.latencyMs}ms)` : 'Connecting to local node...'}
+              title={
+                nodeHealth.isOnline
+                  ? nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50
+                    ? `Node Syncing: Read-Only (~${(nodeHealth.remainingBlocks || 0).toLocaleString()} blocks remaining)`
+                    : `Local Node Synced (${nodeHealth.latencyMs}ms)`
+                  : 'Connecting to local node...'
+              }
             >
               <span
                 className={`h-2 w-2 rounded-full ${
-                  nodeHealth.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                  nodeHealth.isOnline
+                    ? nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50
+                      ? 'bg-amber-500 animate-pulse'
+                      : 'bg-emerald-500 animate-pulse'
+                    : 'bg-slate-400'
                 }`}
               />
               <span className="font-semibold text-[11px]">
-                {nodeHealth.isOnline ? 'Node Online' : 'Syncing'}
+                {nodeHealth.isOnline
+                  ? nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50
+                    ? 'Syncing (Read-Only)'
+                    : 'Node Synced'
+                  : 'Connecting'}
               </span>
               {nodeHealth.isOnline && nodeHealth.latencyMs > 0 && (
                 <span className="font-mono text-[10px] opacity-75">
@@ -1594,6 +1635,49 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
 
           {/* CENTER COLUMN (Main Feed / Thread / Profile) */}
           <main className="col-span-1 lg:col-span-6 space-y-4 pb-24 lg:pb-8">
+            {/* Read-Only Node Synchronization Notice Banner (Hidden when 100% Synced) */}
+            {nodeHealth.isOnline && nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50 && (
+              <div className="bg-gradient-to-r from-amber-500/10 via-amber-50 to-amber-500/10 border border-amber-300 rounded-2xl p-4 shadow-xs space-y-2.5 animate-in fade-in duration-300">
+                <div className="flex items-start gap-3">
+                  <div className="flex items-center justify-center h-8 w-8 rounded-xl bg-amber-500 text-white shrink-0 shadow-xs mt-0.5">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-bold text-xs sm:text-sm text-amber-950">
+                        Read-Only Mode • Blockchain Synchronizing
+                      </h4>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 uppercase tracking-wide">
+                        Syncing
+                      </span>
+                    </div>
+                    <p className="text-[11px] sm:text-xs text-amber-800 leading-relaxed mt-1">
+                      Your local Snapchain read node is currently synchronizing historical blocks from the blockchain. All reading operations (viewing feeds, user profiles, and posts) are fully active. Interactive actions like publishing casts or liking posts will be enabled once synchronization reaches the live network tip.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Sync Progress Details */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-200 text-[11px]">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-medium">
+                    <span className="text-amber-700 font-normal">Remaining:</span>
+                    <span className="font-bold font-mono">~{(nodeHealth.remainingBlocks || 0).toLocaleString()} blocks</span>
+                  </div>
+
+                  {nodeHealth.estimatedTimeFormatted && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-medium">
+                      <span className="text-amber-700 font-normal">Est. Time:</span>
+                      <span className="font-bold">~{nodeHealth.estimatedTimeFormatted}</span>
+                    </div>
+                  )}
+
+                  <span className="text-[10px] text-amber-700/80 ml-auto font-medium">
+                    Auto-refreshes every 15s • Hides automatically when 100% synced
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* VIEW 1: HOME FEED */}
             {activeTab === 'feed' && (
               <div className="space-y-4">
@@ -2833,6 +2917,11 @@ export function FarcasterClient({ initialSlug }: FarcasterClientProps = {}) {
         onPublish={handleModalPublishCast}
         quoteCast={quoteCast}
         onClearQuote={() => setQuoteCast(null)}
+        nodeSyncState={{
+          isSyncing: !!nodeHealth.isSyncing && (nodeHealth.remainingBlocks || 0) > 50,
+          remainingBlocks: nodeHealth.remainingBlocks,
+          estimatedTimeFormatted: nodeHealth.estimatedTimeFormatted,
+        }}
       />
     </div>
   );

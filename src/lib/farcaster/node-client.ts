@@ -67,6 +67,10 @@ export interface NodeHealthResult {
   url: string;
   version?: string;
   isSyncing?: boolean;
+  maxBlockDelay?: number;
+  remainingBlocks?: number;
+  estimatedTimeFormatted?: string;
+  shardInfos?: Array<{ shardId: number; maxHeight: number; blockDelay: number }>;
   peerCount?: number;
   numMessages?: number;
   numFidRegistrations?: number;
@@ -122,12 +126,41 @@ export class SnapchainNodeClient {
       }
 
       const data = await response.json();
+      const shardInfos: Array<{ shardId: number; maxHeight: number; blockDelay: number }> =
+        (data?.shardInfos || []).map((s: any) => ({
+          shardId: Number(s.shardId ?? 0),
+          maxHeight: Number(s.maxHeight ?? 0),
+          blockDelay: Number(s.blockDelay ?? 0),
+        }));
+
+      const maxBlockDelay = shardInfos.length > 0
+        ? Math.max(...shardInfos.map((s) => s.blockDelay || 0))
+        : 0;
+
+      const isSyncing = (data?.isSyncing === true) || (maxBlockDelay > 50);
+
+      let estimatedTimeFormatted = '';
+      if (maxBlockDelay > 50) {
+        const totalMinutes = Math.ceil(maxBlockDelay / 500);
+        if (totalMinutes < 60) {
+          estimatedTimeFormatted = `${totalMinutes} min`;
+        } else {
+          const hours = Math.floor(totalMinutes / 60);
+          const mins = totalMinutes % 60;
+          estimatedTimeFormatted = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        }
+      }
+
       return {
         isOnline: true,
         latencyMs,
         url: cleanUrl,
         version: data.version || data.hubVersion || 'Snapchain Read Node',
-        isSyncing: data.isSyncing ?? false,
+        isSyncing,
+        maxBlockDelay,
+        remainingBlocks: maxBlockDelay,
+        estimatedTimeFormatted,
+        shardInfos,
         peerCount: data.peerCount || data.numPeers || 0,
         numMessages: data.dbStats?.numMessages || 0,
         numFidRegistrations: data.dbStats?.numFidRegistrations || 0,
@@ -151,12 +184,41 @@ export class SnapchainNodeClient {
           if (altRes.ok) {
             const data = await altRes.json();
             this.defaultNodeUrl = dockerHostUrl;
+            const shardInfos: Array<{ shardId: number; maxHeight: number; blockDelay: number }> =
+              (data?.shardInfos || []).map((s: any) => ({
+                shardId: Number(s.shardId ?? 0),
+                maxHeight: Number(s.maxHeight ?? 0),
+                blockDelay: Number(s.blockDelay ?? 0),
+              }));
+
+            const maxBlockDelay = shardInfos.length > 0
+              ? Math.max(...shardInfos.map((s) => s.blockDelay || 0))
+              : 0;
+
+            const isSyncing = (data?.isSyncing === true) || (maxBlockDelay > 50);
+
+            let estimatedTimeFormatted = '';
+            if (maxBlockDelay > 50) {
+              const totalMinutes = Math.ceil(maxBlockDelay / 500);
+              if (totalMinutes < 60) {
+                estimatedTimeFormatted = `${totalMinutes} min`;
+              } else {
+                const hours = Math.floor(totalMinutes / 60);
+                const mins = totalMinutes % 60;
+                estimatedTimeFormatted = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+              }
+            }
+
             return {
               isOnline: true,
               latencyMs: Date.now() - startTime,
               url: dockerHostUrl,
               version: data.version || data.hubVersion || 'Snapchain Read Node',
-              isSyncing: data.isSyncing ?? false,
+              isSyncing,
+              maxBlockDelay,
+              remainingBlocks: maxBlockDelay,
+              estimatedTimeFormatted,
+              shardInfos,
               peerCount: data.peerCount || data.numPeers || 0,
               numMessages: data.dbStats?.numMessages || 0,
               numFidRegistrations: data.dbStats?.numFidRegistrations || 0,
