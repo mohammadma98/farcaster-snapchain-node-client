@@ -321,8 +321,31 @@ if [ "$ALL_SHARDS_DONE" == "true" ] || { [ "$CONTAINER_RUNNING" == "true" ] && [
     fi
 fi
 
-# Priority 2: Storage capacity validation (only if worker is NOT actively running)
+# Priority 2: Storage capacity validation & stale/incomplete shard purge
 if [ "$IS_WORKER_ACTIVE" != "true" ]; then
+    # Clean up any leftover temporary RAM/disk buffer artifacts from previous crashed sessions
+    rm -rf /dev/shm/snapchain_* /run/shm/snapchain_* /tmp/snapchain_pipe_* /tmp/snapchain_shard_* 2>/dev/null || true
+
+    # Clean up incomplete/unverified shard directories from interrupted downloads to reclaim storage
+    TOTAL_RECLAIMED_GB=0
+    for s in 0 1 2; do
+        s_dir="${SNAPCHAIN_DIR}/.rocks/shard-${s}"
+        s_done="${SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete"
+        if [ -d "$s_dir" ] && [ ! -f "$s_done" ]; then
+            s_bytes=$(du -sb "$s_dir" 2>/dev/null | awk '{print $1}' || echo 0)
+            s_gb=$(( (s_bytes + 536870912) / 1073741824 ))
+            echo -e "  • ${YELLOW}Notice: Found interrupted/incomplete Shard ${s} (~${s_gb} GB). Purging to reclaim disk space...${NC}"
+            rm -rf "$s_dir" 2>/dev/null || true
+            TOTAL_RECLAIMED_GB=$(( TOTAL_RECLAIMED_GB + s_gb ))
+        fi
+    done
+
+    if [ "$TOTAL_RECLAIMED_GB" -gt 0 ]; then
+        sync 2>/dev/null || true
+        echo -e "    ${GREEN}✓ Reclaimed ~${TOTAL_RECLAIMED_GB} GB disk space from interrupted shard files.${NC}\n"
+    fi
+
+    # Determine completed vs remaining shards
     COMPLETED_SHARDS_COUNT=0
     for s in 0 1 2; do
         if [ -f "${SNAPCHAIN_DIR}/.rocks/.shard_${s}.complete" ] && [ -d "${SNAPCHAIN_DIR}/.rocks/shard-${s}" ]; then
@@ -330,11 +353,14 @@ if [ "$IS_WORKER_ACTIVE" != "true" ]; then
         fi
     done
     REMAINING_SHARDS=$(( 3 - COMPLETED_SHARDS_COUNT ))
-    REQUIRED_GB=$(( REMAINING_SHARDS * 200 ))
+
+    # Realistic storage bounds based on remaining shards
     if [ "$COMPLETED_SHARDS_COUNT" -eq 0 ]; then
-        REQUIRED_GB=600
-    elif [ "$REQUIRED_GB" -lt 150 ]; then
-        REQUIRED_GB=150
+        REQUIRED_GB=600  # Fresh installation strictly requires 600 GB
+    elif [ "$REMAINING_SHARDS" -eq 1 ]; then
+        REQUIRED_GB=80   # Single remaining shard only requires ~80 GB
+    else
+        REQUIRED_GB=160  # Two remaining shards require ~160 GB
     fi
 
     FREE_GB=$(df -P -BG "$SNAPCHAIN_DIR" 2>/dev/null | awk 'NR==2 {gsub(/[^0-9]/,"",$4); print $4+0}')
@@ -343,8 +369,12 @@ if [ "$IS_WORKER_ACTIVE" != "true" ]; then
         echo -e "${RED}${BOLD}  [ERROR] INSUFFICIENT STORAGE SPACE (${FREE_GB} GB < ${REQUIRED_GB} GB)   ${NC}"
         echo -e "${RED}${BOLD}================================================================${NC}"
         echo -e "${RED}Available storage on target: ${FREE_GB} GB${NC}"
-        echo -e "${RED}Minimum required storage:    ${REQUIRED_GB} GB${NC}"
-        echo -e "${RED}A minimum of 600 GB free disk space is strictly required for fresh installation.${NC}"
+        echo -e "${RED}Minimum required storage:    ${REQUIRED_GB} GB (for ${REMAINING_SHARDS} remaining shard(s))${NC}"
+        if [ "$COMPLETED_SHARDS_COUNT" -eq 0 ]; then
+            echo -e "${RED}A minimum of 600 GB free disk space is strictly required for fresh installation.${NC}"
+        else
+            echo -e "${RED}Remaining disk space is insufficient to resume snapshot materialization.${NC}"
+        fi
         echo -e "${RED}Setup aborted to protect host storage from exhaustion.${NC}"
         echo -e "${RED}${BOLD}================================================================${NC}\n"
         exit 1
