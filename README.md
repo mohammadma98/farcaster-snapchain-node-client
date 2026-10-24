@@ -129,247 +129,85 @@ App keys (signers) are authorized without blockchain transactions:
 The client suite exposes a comprehensive, zero-dependency RESTful API engine on `http://localhost:3000/api/...` (also directly accessible via your secure Cloudflare HTTPS domain). Every endpoint communicates natively with your local Snapchain node (`http://127.0.0.1:3381`) and the high-speed local indexing layer.
 
 ### 1. Node Health & P2P Diagnostics
-Check the live synchronization state, peer connectivity, and latency of your local Snapchain read node.
-
-* **`GET /api/node/status`**
-  ```bash
-  curl -s http://localhost:3000/api/node/status
-  ```
-  **Response (`200 OK`):**
-  ```json
-  {
-    "status": "ok",
-    "health": {
-      "isOnline": true,
-      "latencyMs": 4,
-      "version": "1.0.0",
-      "isSyncing": false,
-      "peerCount": 24,
-      "numMessages": 85492031,
-      "error": null
-    },
-    "timestamp": 1729761000000
-  }
-  ```
-
----
+* **`GET /api/node/status`**: Live health check, ping latency, peer count, synchronization state, and processed message count from the local Snapchain node.
 
 ### 2. Timeline Feed & Protocol Curation
-Retrieve chronological or personalized protocol casts with granular client attribution filtering.
-
-* **`GET /api/feed`**
+* **`GET /api/feed`**: Retrieve chronological or personalized protocol casts with granular client attribution filtering.
   * **Query Parameters:**
-    * `mode` *(string)*: Feed scope — `'global'` (default) or `'following'` (requires `viewerFid`).
+    * `mode` *(string)*: `'global'` (default) or `'following'` (requires `viewerFid`).
     * `limit` *(integer)*: Maximum number of casts to return (default: `20`, max: `100`).
-    * `cursor` *(integer)*: Microsecond/millisecond timestamp cursor for cursor-based pagination.
-    * `source` *(string)*: Client source filter — e.g. `'all'`, `'Warpcast'`, `'Supercast'`, `'Direct Snapchain'`.
+    * `cursor` *(integer)*: Timestamp cursor for pagination.
+    * `source` *(string)*: Client source filter (e.g. `'all'`, `'Warpcast'`, `'Supercast'`, `'Direct Snapchain'`).
     * `fid` *(integer)*: Filter casts authored exclusively by a specific FID.
-    * `viewerFid` *(integer)*: Viewing user's FID (used to resolve personal likes, recasts, and follow graph state).
-    * `client_fids` *(string)*: Comma-separated list of app FIDs to include (e.g. `9152,414214`).
-    * `exclude_client_fids` *(string)*: Comma-separated list of app FIDs to hide (e.g. `9152` to exclude Warpcast).
-    * `only_self_registered` *(boolean)*: When `true`, filters only casts from verified self-registered accounts.
-
-  ```bash
-  # Retrieve recent feed excluding Warpcast casts
-  curl -s "http://localhost:3000/api/feed?limit=25&source=Supercast"
-  ```
-
-  **Response (`200 OK`):**
-  ```json
-  {
-    "casts": [
-      {
-        "hash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8",
-        "author": {
-          "fid": 2,
-          "username": "v",
-          "displayName": "Varun Srinivasan",
-          "pfpUrl": "https://...",
-          "bio": "Building Farcaster"
-        },
-        "text": "Decentralized social networking on Snapchain.",
-        "timestamp": 1729760950,
-        "client": { "name": "Supercast", "fid": 414214 },
-        "reactions": { "likes": 42, "recasts": 12 },
-        "viewerContext": { "liked": false, "recasted": false }
-      }
-    ],
-    "nextCursor": 1729758000
-  }
-  ```
-
----
+    * `viewerFid` *(integer)*: Viewer's FID to resolve personalized like/recast/follow states.
+    * `client_fids` *(string)*: Comma-separated list of client FIDs to include.
+    * `exclude_client_fids` *(string)*: Comma-separated list of client FIDs to exclude (e.g. `9152` for Warpcast).
+    * `only_self_registered` *(boolean)*: Filter casts strictly to verified self-registered accounts.
 
 ### 3. Cast Publishing & Thread Retrieval
-Publish new casts, replies, and quote casts directly to the node mempool using signed Ed25519 binary protobufs.
-
-* **`POST /api/casts`**
-  ```bash
-  curl -X POST http://localhost:3000/api/casts \
-    -H "Content-Type: application/json" \
-    -d '{
+* **`POST /api/casts`**: Publish a new cast, quote cast, or thread reply directly to the read node mempool via signed binary Protobuf.
+  * **Body:**
+    ```json
+    {
       "fid": 320011,
-      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "signerPrivateKey": "0x...",
       "text": "Broadcasting directly to my standalone Snapchain node!",
-      "embeds": [{ "url": "https://farcaster.xyz" }],
-      "parentCastId": {
-        "fid": 2,
-        "hash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8"
-      }
-    }'
-  ```
-
-  **Response (`200 OK`):**
-  ```json
-  {
-    "status": "ok",
-    "success": true,
-    "hash": "0x3e1a8b94c7d2e1f0a9b8c7d6e5f4a3b2c1d0e9f1",
-    "cast": {
-      "hash": "0x3e1a8b94c7d2e1f0a9b8c7d6e5f4a3b2c1d0e9f1",
-      "fid": 320011,
-      "text": "Broadcasting directly to my standalone Snapchain node!"
+      "embeds": [{ "url": "https://example.com/image.png" }],
+      "parentCastId": { "fid": 2, "hash": "0x8f2a1b94..." }
     }
-  }
-  ```
-
-* **`GET /api/casts/:hash`**
-  Fetch full conversation threads, parent casts, root casts, and ordered replies:
-  ```bash
-  curl -s http://localhost:3000/api/casts/0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8
-  ```
-
----
+    ```
+* **`GET /api/casts/:hash`**: Fetch complete conversation threads, parent casts, root casts, and ordered replies.
 
 ### 4. Reactions (Likes & Recasts)
-Submit or retract likes and recasts to the protocol mempool.
-
-* **`POST /api/reactions`**
-  ```bash
-  curl -X POST http://localhost:3000/api/reactions \
-    -H "Content-Type: application/json" \
-    -d '{
+* **`POST /api/reactions`**: Submit or retract likes and recasts to the protocol mempool.
+  * **Body:**
+    ```json
+    {
       "fid": 320011,
-      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "signerPrivateKey": "0x...",
       "targetFid": 2,
-      "targetHash": "0x8f2a1b94c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8",
+      "targetHash": "0x8f2a1b94...",
       "type": "like",
       "isRemove": false
-    }'
-  ```
-
-  **Parameters:**
-  * `type` *(string)*: `'like'` or `'recast'`.
-  * `isRemove` *(boolean)*: `false` to add reaction, `true` to remove/retract.
-
----
+    }
+    ```
+  * `type`: `'like'` or `'recast'`. `isRemove`: `false` to add, `true` to retract.
 
 ### 5. Social Graph (Follows & Unfollows)
-Establish or tear down on-chain follow relationships via `LinkAdd` / `LinkRemove` protocol messages.
-
-* **`POST /api/links`**
-  ```bash
-  curl -X POST http://localhost:3000/api/links \
-    -H "Content-Type: application/json" \
-    -d '{
+* **`POST /api/links`**: Follow or unfollow users via protocol-level `LinkAdd` / `LinkRemove` messages.
+  * **Body:**
+    ```json
+    {
       "fid": 320011,
-      "signerPrivateKey": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "signerPrivateKey": "0x...",
       "targetFid": 3,
       "type": "follow",
       "isRemove": false
-    }'
-  ```
-
----
+    }
+    ```
 
 ### 6. User Profiles & Cast History
-Query on-chain identities, social stats, profile metadata, and published casts.
-
-* **`GET /api/users/:id`**: Resolve by numeric FID (`/api/users/2`) or username (`/api/users/dwr.eth`).
-* **`GET /api/users/:id/casts?limit=30`**: Chronological list of casts published by the user.
-* **`GET /api/users/search?q=alice`**: Search user accounts by username, display name, or FID.
-
----
+* **`GET /api/users/:id`**: Fetch user profile metadata, display name, bio, follower count, and custody address by numeric FID (`/api/users/2`) or handle (`/api/users/dwr.eth`).
+* **`GET /api/users/:id/casts?limit=30`**: Retrieve chronological casts published by the user.
+* **`GET /api/users/search?q=query`**: Search user accounts by username, display name, or FID.
 
 ### 7. Multi-Chain Wallet Balances & Portfolio
-Inspect live on-chain token balances and USD values across **Ethereum** and **Base** for any custody address or FID.
-
-* **`GET /api/wallet/tokens?fid=320011`**
-* **`GET /api/wallet/tokens?address=0x1234567890abcdef1234567890abcdef12345678`**
-
-  **Response (`200 OK`):**
-  ```json
-  {
-    "status": "ok",
-    "address": "0x1234567890abcdef1234567890abcdef12345678",
-    "totalUsd": 1420.50,
-    "tokens": [
-      {
-        "id": "eth",
-        "name": "Ether",
-        "symbol": "ETH",
-        "decimals": 18,
-        "amount": 0.45,
-        "price": 2700.00,
-        "usdValue": 1215.00,
-        "network": "Ethereum"
-      },
-      {
-        "id": "degen",
-        "name": "Degen",
-        "symbol": "DEGEN",
-        "decimals": 18,
-        "amount": 25000.0,
-        "price": 0.00822,
-        "usdValue": 205.50,
-        "network": "Base"
-      }
-    ]
-  }
-  ```
-
----
+* **`GET /api/wallet/tokens?fid=320011`** or **`GET /api/wallet/tokens?address=0x...`**: Query live on-chain token holdings, balances, and USD valuation across **Ethereum** and **Base** networks.
 
 ### 8. Image & Media Upload
-Upload images to attach to casts with server-side magic byte verification (supports JPEG, PNG, GIF, WebP up to 10 MB).
-
-* **`POST /api/upload`** (Multipart Form Data with field `file`):
-  ```bash
-  curl -X POST http://localhost:3000/api/upload \
-    -F "file=@screenshot.png"
-  ```
-  **Response (`200 OK`):**
-  ```json
-  {
-    "status": "ok",
-    "url": "/uploads/media_7f8a9b1c2d.png"
-  }
-  ```
-
----
+* **`POST /api/upload`**: Upload images for cast embeds with server-side magic byte verification (supports JPEG, PNG, GIF, WebP up to 10 MB). Accepts multipart form data with field `file` and returns the hosted media URL.
 
 ### 9. Client Ecosystem Registry
-Retrieve detected ecosystem clients, app names, and assigned client FIDs for attribution filtering.
-
-* **`GET /api/clients`**
-  ```json
-  {
-    "status": "ok",
-    "clients": [
-      { "name": "Warpcast", "fid": 9152 },
-      { "name": "Supercast", "fid": 414214 },
-      { "name": "Phaver", "fid": 9534 },
-      { "name": "Herocast", "fid": 194682 },
-      { "name": "Direct Snapchain", "fid": 0 }
-    ]
-  }
-  ```
-
----
+* **`GET /api/clients`**: Retrieve registered Farcaster client applications and their corresponding App FIDs for client-level filtering.
 
 ### 10. Authentication & Gasless Signer Management
-* **`POST /api/auth/login`**: Authenticate using 12/24-word seed phrase or active Ed25519 signer private key. Automatically signs an off-chain EIP-712 custody authorization to register a zero-gas app signer.
-* **`POST /api/auth/sandbox`**: Instant one-click generation of a 12-word sandbox mnemonic and isolated test account for rapid local development.
+* **`POST /api/auth/login`**: Authenticate using your 24-word recovery phrase. Derives the custody address and automatically generates an off-chain EIP-712 custody authorization to register a zero-gas Ed25519 app signer without requiring gas or raw private keys.
+  * **Body:**
+    ```json
+    {
+      "mnemonic": "word1 word2 ... word24"
+    }
+    ```
 
 ---
 
